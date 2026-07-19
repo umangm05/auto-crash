@@ -1,5 +1,5 @@
 import type { Rng } from '../core/rng';
-import { randInt } from '../core/rng';
+import { createRng, randInt } from '../core/rng';
 
 export type Biome = 'city' | 'desert' | 'rural';
 
@@ -27,14 +27,14 @@ export const BIOME_COLORS: Record<
   }
 > = {
   city: {
-    ground: '#2c3138',
-    road: '#0c0c0c',
-    roadEdge: '#f0f0f0',
-    obstacle: '#3a4550',
+    ground: '#3a4048',
+    road: '#0a0a0a',
+    roadEdge: '#e8e8e8',
+    obstacle: '#3d4a56',
     obstacleStroke: '#1a1f26',
     grid: '#1f242c',
-    junction: '#0c0c0c',
-    bridge: '#6b6358',
+    junction: '#0a0a0a',
+    bridge: '#0a0a0a',
     gap: '#1a6fb5',
   },
   desert: {
@@ -63,21 +63,24 @@ export const BIOME_COLORS: Record<
 
 /** Cell kinds used by chunk generation / rendering. */
 export enum CellKind {
-  /** Open lot / sidewalk (city) or open field. */
+  /** Open lot / sidewalk / park (drivable but slow). */
   OPEN = 0,
   /** Formal road / street. */
   ROAD = 1,
   /** Road junction / intersection (zebra painted). */
   JUNCTION = 2,
-  /** Bridge over a river. */
+  /** Bridge deck over a river (drives like road). */
   BRIDGE = 3,
-  /** Impassable obstacle (building footprint cells). */
+  /** Impassable building footprint. */
   BLOCK = 4,
   /** Impassable river — only crossable via BRIDGE. */
   GAP = 5,
+  /** Park greenspace (walkable/slow like OPEN, painted green). */
+  PARK = 6,
+  /** Roadside railing patch — impassable barrier on a short stretch. */
+  RAIL = 7,
 }
 
-/** Axis-aligned building footprint in global cell coords. */
 export interface BuildingRect {
   col: number;
   row: number;
@@ -92,14 +95,17 @@ export interface ChunkGenResult {
 }
 
 export function isWalkableKind(kind: CellKind): boolean {
-  return kind !== CellKind.BLOCK && kind !== CellKind.GAP;
+  return kind !== CellKind.BLOCK && kind !== CellKind.GAP && kind !== CellKind.RAIL;
 }
 
 export function isRoadLike(kind: CellKind): boolean {
   return kind === CellKind.ROAD || kind === CellKind.JUNCTION || kind === CellKind.BRIDGE;
 }
 
-const BUILDING_PALETTE = ['#3d4a56', '#4a5560', '#2f3a44', '#55606a', '#3a424c', '#48525c'];
+const BUILDING_PALETTE = ['#3d4a56', '#4a5560', '#2f3a44', '#55606a', '#3a424c', '#48525c', '#2a3340'];
+
+/** Superblock size in cells — larger = fewer roads / bigger blocks. */
+const SUPER = 36;
 
 /**
  * Generate one chunk. Global cell = chunk * size + local.
@@ -126,7 +132,6 @@ function idx(size: number, c: number, r: number): number {
   return r * size + c;
 }
 
-/** Paint road without inventing junctions (junctions are a final H∩V pass). */
 function setRoad(cells: CellKind[], size: number, c: number, r: number): void {
   if (c < 0 || r < 0 || c >= size || r >= size) return;
   const i = idx(size, c, r);
@@ -136,77 +141,141 @@ function setRoad(cells: CellKind[], size: number, c: number, r: number): void {
     return;
   }
   if (cur === CellKind.BRIDGE || cur === CellKind.JUNCTION) return;
+  if (cur === CellKind.PARK) {
+    cells[i] = CellKind.ROAD;
+    return;
+  }
   cells[i] = CellKind.ROAD;
 }
 
-function paintHRoad(cells: CellKind[], size: number, r: number, width: number): void {
+function paintHSpan(
+  cells: CellKind[],
+  size: number,
+  r: number,
+  width: number,
+  c0: number,
+  c1: number,
+): void {
   for (let w = 0; w < width; w++) {
     const row = r + w;
     if (row < 0 || row >= size) continue;
-    for (let c = 0; c < size; c++) setRoad(cells, size, c, row);
+    for (let c = c0; c <= c1; c++) setRoad(cells, size, c, row);
   }
 }
 
-function paintVRoad(cells: CellKind[], size: number, c: number, width: number): void {
+function paintVSpan(
+  cells: CellKind[],
+  size: number,
+  c: number,
+  width: number,
+  r0: number,
+  r1: number,
+): void {
   for (let w = 0; w < width; w++) {
     const col = c + w;
     if (col < 0 || col >= size) continue;
-    for (let r = 0; r < size; r++) setRoad(cells, size, col, r);
+    for (let r = r0; r <= r1; r++) setRoad(cells, size, col, r);
   }
 }
 
-/** World arterial periods — shared so junctions = H∩V in world space. */
-export const CITY_GRID = {
-  H_PERIOD: 8,
-  V_PERIOD: 8,
-  H_WIDTH: 2,
-  V_WIDTH: 2,
-  H2_PERIOD: 20,
-  V2_PERIOD: 20,
-  H2_OFFSET: 5,
-  V2_OFFSET: 9,
-} as const;
+function hash2(a: number, b: number): number {
+  let x = (a * 374761393 + b * 668265263) | 0;
+  x = (x ^ (x >>> 13)) * 1274126177;
+  return (x ^ (x >>> 16)) >>> 0;
+}
 
+function superId(g: number): number {
+  return Math.floor(g / SUPER);
+}
+
+function superLocal(g: number): number {
+  return ((g % SUPER) + SUPER) % SUPER;
+}
+
+/**
+ * Sparse irregular streets — edges keep chunks connected; interiors are few.
+ */
+function vStreetsInSuper(sx: number): Array<{ local: number; width: number; major: boolean }> {
+  const rng = createRng(`vstreet|${sx}`);
+  const out: Array<{ local: number; width: number; major: boolean }> = [];
+  const major = sx % 4 === 0;
+  // Majors are 3 lanes; some interiors are 2
+  out.push({ local: 0, width: major ? 3 : 1, major });
+
+  // 1–2 interior streets only, wide gaps between blocks
+  const interior = 1 + (rng() < 0.45 ? 1 : 0);
+  let cursor = 8 + randInt(rng, 0, 6);
+  for (let i = 0; i < interior && cursor < SUPER - 6; i++) {
+    const w = rng() < 0.2 ? 3 : rng() < 0.45 ? 2 : 1;
+    out.push({ local: cursor, width: w, major: false });
+    cursor += 10 + randInt(rng, 0, 8);
+  }
+  out.push({ local: SUPER - 1, width: 1, major: false });
+  return dedupeStreets(out);
+}
+
+function hStreetsInSuper(sy: number): Array<{ local: number; width: number; major: boolean }> {
+  const rng = createRng(`hstreet|${sy}`);
+  const out: Array<{ local: number; width: number; major: boolean }> = [];
+  const major = sy % 4 === 0;
+  out.push({ local: 0, width: major ? 3 : 1, major });
+
+  const interior = 1 + (rng() < 0.4 ? 1 : 0);
+  let cursor = 8 + randInt(rng, 0, 6);
+  for (let i = 0; i < interior && cursor < SUPER - 6; i++) {
+    const w = rng() < 0.2 ? 3 : rng() < 0.4 ? 2 : 1;
+    out.push({ local: cursor, width: w, major: false });
+    cursor += 10 + randInt(rng, 0, 9);
+  }
+  out.push({ local: SUPER - 1, width: 1, major: false });
+  return dedupeStreets(out);
+}
+
+function dedupeStreets(
+  streets: Array<{ local: number; width: number; major: boolean }>,
+): Array<{ local: number; width: number; major: boolean }> {
+  const map = new Map<number, { local: number; width: number; major: boolean }>();
+  for (const s of streets) {
+    const prev = map.get(s.local);
+    if (!prev || s.width > prev.width || s.major) map.set(s.local, s);
+  }
+  return [...map.values()].sort((a, b) => a.local - b.local);
+}
+
+export function isCityVStreet(
+  globalC: number,
+): { local: number; width: number; major: boolean } | null {
+  const sx = superId(globalC);
+  const local = superLocal(globalC);
+  for (const s of vStreetsInSuper(sx)) {
+    if (local >= s.local && local < s.local + s.width) return s;
+  }
+  return null;
+}
+
+export function isCityHStreet(
+  globalR: number,
+): { local: number; width: number; major: boolean } | null {
+  const sy = superId(globalR);
+  const local = superLocal(globalR);
+  for (const s of hStreetsInSuper(sy)) {
+    if (local >= s.local && local < s.local + s.width) return s;
+  }
+  return null;
+}
+
+/** Legacy helpers used by junction marking / docs. */
 export function onCityHorizontal(globalR: number): boolean {
-  const { H_PERIOD, H_WIDTH, H2_PERIOD, H2_OFFSET } = CITY_GRID;
-  const mod = ((globalR % H_PERIOD) + H_PERIOD) % H_PERIOD;
-  const mod2 = ((globalR % H2_PERIOD) + H2_PERIOD) % H2_PERIOD;
-  return mod < H_WIDTH || mod2 === H2_OFFSET;
+  return isCityHStreet(globalR) !== null;
 }
 
 export function onCityVertical(globalC: number): boolean {
-  const { V_PERIOD, V_WIDTH, V2_PERIOD, V2_OFFSET } = CITY_GRID;
-  const mod = ((globalC % V_PERIOD) + V_PERIOD) % V_PERIOD;
-  const mod2 = ((globalC % V2_PERIOD) + V2_PERIOD) % V2_PERIOD;
-  return mod < V_WIDTH || mod2 === V2_OFFSET;
+  return isCityVStreet(globalC) !== null;
 }
 
 /**
- * Junctions ONLY where a horizontal arterial crosses a vertical one.
- * Neighbor-counting is wrong for dual-lane roads (parallel lane looks like a cross).
- */
-function markWorldJunctions(
-  cells: CellKind[],
-  size: number,
-  cx: number,
-  cy: number,
-): void {
-  for (let row = 0; row < size; row++) {
-    for (let col = 0; col < size; col++) {
-      const i = idx(size, col, row);
-      if (cells[i] !== CellKind.ROAD) continue;
-      const gC = cx * size + col;
-      const gR = cy * size + row;
-      if (onCityHorizontal(gR) && onCityVertical(gC)) {
-        cells[i] = CellKind.JUNCTION;
-      }
-    }
-  }
-}
-
-/**
- * City: world-aligned continuous arterials (no dead ends), rivers + bridges,
- * random rectangular buildings. Junctions = world H∩V only.
+ * City: continuous irregular H/V arterials (never cut), parks, river+bridges.
+ * No post-hoc arm carving / diagonals — those were fragmenting the road network.
  */
 function genCity(
   cells: CellKind[],
@@ -218,76 +287,205 @@ function genCity(
 ): ChunkGenResult {
   cells.fill(CellKind.OPEN);
 
+  const gC0 = cx * size;
+  const gR0 = cy * size;
+
+  // Full-span streets — always continuous across chunk borders.
+  // Skip E-W arterials that fall inside the river band (V streets cross on bridges).
   for (let r = 0; r < size; r++) {
-    if (onCityHorizontal(cy * size + r)) paintHRoad(cells, size, r, 1);
+    if (!isCityHStreet(gR0 + r)) continue;
+    if (inRiverBand(gR0 + r)) continue;
+    paintHSpan(cells, size, r, 1, 0, size - 1);
   }
   for (let c = 0; c < size; c++) {
-    if (onCityVertical(cx * size + c)) paintVRoad(cells, size, c, 1);
+    if (!isCityVStreet(gC0 + c)) continue;
+    paintVSpan(cells, size, c, 1, 0, size - 1);
   }
 
+  paintParks(cells, size, rng, gC0, gR0);
   paintWorldRiverAndBridges(cells, size, cx, cy);
+  paintRailPatches(cells, size, rng, gC0, gR0);
 
   const buildings = placeBuildings(cells, size, rng, density, cx, cy);
-  markWorldJunctions(cells, size, cx, cy);
+  markArterialCrossings(cells, size, cx, cy);
 
   return { cells, buildings };
 }
 
-/** Horizontal river every ~40 world cells; vertical roads become bridges. */
+/**
+ * Short roadside railing patches — OPEN cells beside a road become impassable
+ * RAIL for a few cells only (barrier the car cannot cross).
+ */
+function paintRailPatches(
+  cells: CellKind[],
+  size: number,
+  rng: Rng,
+  gC0: number,
+  gR0: number,
+): void {
+  const patches = 2 + (rng() < 0.5 ? 1 : 0);
+  for (let p = 0; p < patches; p++) {
+    const alongH = rng() < 0.5;
+    const len = 3 + randInt(rng, 0, 4); // small patch
+    if (alongH) {
+      // Find an H street row in this chunk
+      let roadR = -1;
+      for (let r = 0; r < size; r++) {
+        if (isCityHStreet(gR0 + r) && !inRiverBand(gR0 + r)) {
+          roadR = r;
+          if (rng() < 0.4) break;
+        }
+      }
+      if (roadR < 0) continue;
+      const side = rng() < 0.5 ? -1 : 1; // north or south of road
+      const railR = roadR + side;
+      if (railR < 0 || railR >= size) continue;
+      const c0 = randInt(rng, 1, Math.max(2, size - len));
+      for (let c = c0; c < c0 + len && c < size; c++) {
+        const i = idx(size, c, railR);
+        if (cells[i] !== CellKind.OPEN) continue;
+        // Must still be beside road
+        if (!isRoadLike(cells[idx(size, c, roadR)]!)) continue;
+        cells[i] = CellKind.RAIL;
+      }
+    } else {
+      let roadC = -1;
+      for (let c = 0; c < size; c++) {
+        if (isCityVStreet(gC0 + c)) {
+          roadC = c;
+          if (rng() < 0.4) break;
+        }
+      }
+      if (roadC < 0) continue;
+      const side = rng() < 0.5 ? -1 : 1;
+      const railC = roadC + side;
+      if (railC < 0 || railC >= size) continue;
+      const r0 = randInt(rng, 1, Math.max(2, size - len));
+      for (let r = r0; r < r0 + len && r < size; r++) {
+        const i = idx(size, railC, r);
+        if (cells[i] !== CellKind.OPEN) continue;
+        if (!isRoadLike(cells[idx(size, roadC, r)]!)) continue;
+        cells[i] = CellKind.RAIL;
+      }
+    }
+  }
+}
+
+function paintParks(
+  cells: CellKind[],
+  size: number,
+  rng: Rng,
+  gC0: number,
+  gR0: number,
+): void {
+  const parkRng = createRng(`park|${Math.floor(gC0 / SUPER)}|${Math.floor(gR0 / SUPER)}`);
+  if (parkRng() > 0.45) return;
+
+  const pw = 3 + randInt(rng, 0, 3);
+  const ph = 3 + randInt(rng, 0, 3);
+  const c0 = randInt(rng, 1, Math.max(2, size - pw));
+  const r0 = randInt(rng, 1, Math.max(2, size - ph));
+  for (let r = r0; r < r0 + ph && r < size; r++) {
+    for (let c = c0; c < c0 + pw && c < size; c++) {
+      const i = idx(size, c, r);
+      if (isRoadLike(cells[i]!)) continue;
+      cells[i] = CellKind.PARK;
+    }
+  }
+}
+
+/** Mark every cell in an H∩V arterial cross as JUNCTION (for gameplay). */
+function markArterialCrossings(
+  cells: CellKind[],
+  size: number,
+  cx: number,
+  cy: number,
+): void {
+  for (let row = 0; row < size; row++) {
+    for (let col = 0; col < size; col++) {
+      const i = idx(size, col, row);
+      if (cells[i] !== CellKind.ROAD) continue;
+      const gC = cx * size + col;
+      const gR = cy * size + row;
+      if (isCityHStreet(gR) && isCityVStreet(gC)) {
+        cells[i] = CellKind.JUNCTION;
+      }
+    }
+  }
+}
+
+/** One intersection rect per H∩V arterial cross — used to paint a single zebra. */
+export interface IntersectionRect {
+  col: number;
+  row: number;
+  w: number;
+  h: number;
+}
+
+export function collectIntersections(
+  minC: number,
+  maxC: number,
+  minR: number,
+  maxR: number,
+): IntersectionRect[] {
+  const out: IntersectionRect[] = [];
+  const seen = new Set<string>();
+  // Pad so anchors just outside view still draw if their rect overlaps
+  for (let gR = minR - 2; gR <= maxR + 2; gR++) {
+    for (let gC = minC - 2; gC <= maxC + 2; gC++) {
+      const vs = isCityVStreet(gC);
+      const hs = isCityHStreet(gR);
+      if (!vs || !hs) continue;
+      const aC = superId(gC) * SUPER + vs.local;
+      const aR = superId(gR) * SUPER + hs.local;
+      if (gC !== aC || gR !== aR) continue;
+      const key = `${aC},${aR}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ col: aC, row: aR, w: vs.width, h: hs.width });
+    }
+  }
+  return out;
+}
+
+/**
+ * River band stays blue water. Bridges are SHORT spans only where a
+ * vertical street crosses — never convert the whole river into a brown deck.
+ */
+const RIVER_PERIOD = 48;
+const RIVER_WIDTH = 3;
+const RIVER_START = 20;
+
+function inRiverBand(globalR: number): boolean {
+  const mod = ((globalR % RIVER_PERIOD) + RIVER_PERIOD) % RIVER_PERIOD;
+  return mod >= RIVER_START && mod < RIVER_START + RIVER_WIDTH;
+}
+
 function paintWorldRiverAndBridges(
   cells: CellKind[],
   size: number,
-  _cx: number,
+  cx: number,
   cy: number,
 ): void {
-  const RIVER_PERIOD = 40;
-  const RIVER_WIDTH = 3;
-  const RIVER_START = 16; // band within period
-
-  // Snapshot which cells were road before carving the river
-  const wasRoad = new Uint8Array(size * size);
-  for (let i = 0; i < cells.length; i++) {
-    if (isRoadLike(cells[i]!)) wasRoad[i] = 1;
-  }
-
   for (let r = 0; r < size; r++) {
-    const globalR = cy * size + r;
-    const mod = ((globalR % RIVER_PERIOD) + RIVER_PERIOD) % RIVER_PERIOD;
-    if (mod < RIVER_START || mod >= RIVER_START + RIVER_WIDTH) continue;
+    if (!inRiverBand(cy * size + r)) continue;
     for (let c = 0; c < size; c++) {
       cells[idx(size, c, r)] = CellKind.GAP;
     }
   }
 
-  // Bridges: where a vertical road crossed the river, restore a deck
+  // Bridges: vertical streets only — short black decks over blue water
   for (let c = 0; c < size; c++) {
-    let hadRoadInCol = false;
-    for (let r = 0; r < size; r++) {
-      if (wasRoad[idx(size, c, r)]) {
-        hadRoadInCol = true;
-        break;
-      }
-    }
-    if (!hadRoadInCol) continue;
-    for (let r = 0; r < size; r++) {
-      if (cells[idx(size, c, r)] === CellKind.GAP && wasRoad[idx(size, c, r)]) {
-        cells[idx(size, c, r)] = CellKind.BRIDGE;
-      }
-    }
-    // Widen bridge by 1 cell when the neighboring column also had a road
-    if (c + 1 < size) {
-      let adj = false;
+    const vs = isCityVStreet(cx * size + c);
+    if (!vs) continue;
+    // Only convert the start column of a V band (avoid double-widen)
+    if (superLocal(cx * size + c) !== vs.local) continue;
+    for (let w = 0; w < vs.width; w++) {
+      const col = c + w;
+      if (col >= size) break;
       for (let r = 0; r < size; r++) {
-        if (wasRoad[idx(size, c + 1, r)]) {
-          adj = true;
-          break;
-        }
-      }
-      if (adj) {
-        for (let r = 0; r < size; r++) {
-          if (cells[idx(size, c + 1, r)] === CellKind.GAP) {
-            cells[idx(size, c + 1, r)] = CellKind.BRIDGE;
-          }
+        if (cells[idx(size, col, r)] === CellKind.GAP) {
+          cells[idx(size, col, r)] = CellKind.BRIDGE;
         }
       }
     }
@@ -304,7 +502,8 @@ function placeBuildings(
 ): BuildingRect[] {
   const buildings: BuildingRect[] = [];
   const occupied = new Uint8Array(size * size);
-  const attempts = 14 + Math.floor(density * 20);
+  // Sparse roads leave more lots — pack them with buildings
+  const attempts = 36 + Math.floor(density * 40);
 
   const sizes: Array<[number, number]> = [
     [2, 2],
@@ -318,6 +517,10 @@ function placeBuildings(
     [4, 4],
     [5, 3],
     [3, 5],
+    [5, 4],
+    [6, 3],
+    [3, 6],
+    [5, 5],
   ];
 
   for (let n = 0; n < attempts; n++) {
@@ -341,6 +544,33 @@ function placeBuildings(
       color: BUILDING_PALETTE[randInt(rng, 0, BUILDING_PALETTE.length)]!,
     });
   }
+
+  // Fill leftover OPEN lots with smaller blocks so the city feels dense
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      const i = idx(size, c, r);
+      if (cells[i] !== CellKind.OPEN || occupied[i]) continue;
+      if (rng() > 0.55 + density * 0.25) continue;
+      const bw = rng() < 0.5 ? 1 : 2;
+      const bh = rng() < 0.5 ? 1 : 2;
+      if (c + bw > size || r + bh > size) continue;
+      if (!canPlaceBuilding(cells, occupied, size, c, r, bw, bh)) continue;
+      for (let rr = r; rr < r + bh; rr++) {
+        for (let cc = c; cc < c + bw; cc++) {
+          const j = idx(size, cc, rr);
+          cells[j] = CellKind.BLOCK;
+          occupied[j] = 1;
+        }
+      }
+      buildings.push({
+        col: cx * size + c,
+        row: cy * size + r,
+        w: bw,
+        h: bh,
+        color: BUILDING_PALETTE[randInt(rng, 0, BUILDING_PALETTE.length)]!,
+      });
+    }
+  }
   return buildings;
 }
 
@@ -353,11 +583,11 @@ function canPlaceBuilding(
   bw: number,
   bh: number,
 ): boolean {
-  // Footprint must be open lots only — may sit flush against the curb
   for (let r = r0; r < r0 + bh; r++) {
     for (let c = c0; c < c0 + bw; c++) {
       const i = idx(size, c, r);
-      if (cells[i] !== CellKind.OPEN || occupied[i]) return false;
+      const kind = cells[i]!;
+      if (kind !== CellKind.OPEN || occupied[i]) return false;
     }
   }
   return true;
@@ -407,3 +637,6 @@ function genRural(
     if (cells[i] === CellKind.OPEN && rng() < obstacleChance) cells[i] = CellKind.BLOCK;
   }
 }
+
+// silence unused in case tree-shaken oddly in some builds
+void hash2;

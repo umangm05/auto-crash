@@ -3,7 +3,8 @@ import type { BehaviorConfig, PathStyle } from '../core/types';
 import { STEERING, fleeRadiusFromPanic } from '../config/GameConfig';
 import type { Car } from '../entities/Car';
 import type { ChunkWorld } from '../map/ChunkWorld';
-import { findPath } from '../map/Pathfinding';
+import { isRoadLike } from '../map/biomes';
+import { findPath, nearestRoadPoint } from '../map/Pathfinding';
 import { raycastGrid } from '../map/gridCollision';
 import { createRng, gaussian } from '../core/rng';
 
@@ -11,6 +12,7 @@ interface PathCache {
   waypoints: Vector2[];
   goal: Vector2;
   age: number;
+  roadsOnly: boolean;
 }
 
 const pathCaches = new WeakMap<object, PathCache>();
@@ -38,9 +40,11 @@ export class SteeringBehaviors {
     car: Car,
     world: ChunkWorld,
     feelerLen?: number,
+    roadsOnly = false,
   ): { steer: Vector2; blocked: boolean; imminent: boolean } {
     const length = feelerLen ?? STEERING.feelerLength;
     const origin = car.pos;
+    const rayOpts = { roadsOnly };
     const angles = [
       0,
       -STEERING.feelerSpread * 0.55,
@@ -60,7 +64,7 @@ export class SteeringBehaviors {
     for (const a of angles) {
       const dir = Vector2.fromAngle(car.angle + a);
       const tip = origin.add(dir.scale(length * (a === 0 ? 1.15 : 0.85)));
-      const hit = raycastGrid(world, origin, tip, 4);
+      const hit = raycastGrid(world, origin, tip, 4, rayOpts);
       if (!hit) {
         if (a < 0) bestClearLeft = Math.max(bestClearLeft, length);
         if (a > 0) bestClearRight = Math.max(bestClearRight, length);
@@ -70,7 +74,8 @@ export class SteeringBehaviors {
       const dist = Math.max(4, origin.distance(hit));
       if (Math.abs(a) < 0.08) {
         forwardBlocked = true;
-        if (dist < length * 0.55) imminent = true;
+        // Only "imminent" when the bumper is about to kiss a wall
+        if (dist < Math.min(30, length * 0.28)) imminent = true;
       }
       const strength = (1 - dist / (length * 1.15)) * (Math.abs(a) < 0.08 ? 1.8 : 1.1);
       const side = new Vector2(-dir.y, dir.x);
@@ -87,7 +92,7 @@ export class SteeringBehaviors {
     }
 
     // Continuous side-wall repulsion (keeps cars centered in the lane)
-    const sidePull = this.laneCenterPull(car, world);
+    const sidePull = this.laneCenterPull(car, world, roadsOnly);
     if (sidePull.length() > 1e-4) {
       steer = steer.add(sidePull.scale(1.4));
       hits++;
@@ -99,18 +104,57 @@ export class SteeringBehaviors {
   }
 
   /** Nudge toward the middle of the walkable corridor under the car. */
-  private laneCenterPull(car: Car, world: ChunkWorld): Vector2 {
+  private laneCenterPull(car: Car, world: ChunkWorld, roadsOnly = false): Vector2 {
     const origin = car.pos;
     const side = car.side;
     const probe = STEERING.sideProbeLength;
-    const leftHit = raycastGrid(world, origin, origin.add(side.scale(-probe)), 3);
-    const rightHit = raycastGrid(world, origin, origin.add(side.scale(probe)), 3);
+    const rayOpts = { roadsOnly };
+    const leftHit = raycastGrid(world, origin, origin.add(side.scale(-probe)), 3, rayOpts);
+    const rightHit = raycastGrid(world, origin, origin.add(side.scale(probe)), 3, rayOpts);
     const leftClear = leftHit ? origin.distance(leftHit) : probe;
     const rightClear = rightHit ? origin.distance(rightHit) : probe;
     // If one side is much closer, push away from that wall
     const imbalance = rightClear - leftClear;
     if (Math.abs(imbalance) < 6) return Vector2.zero();
     return side.scale(Math.max(-1, Math.min(1, imbalance / probe)));
+  }
+
+  /**
+   * When lots are walls, feelers ignore them (to avoid curb-braking) — so we
+   * separately pull the nose toward the asphalt midline before scraping.
+   */
+  keepCenteredOnRoad(car: Car, world: ChunkWorld): void {
+    const side = car.side;
+    const probe = STEERING.sideProbeLength;
+    const origin = car.pos;
+    const leftHit = raycastGrid(
+      world,
+      origin,
+      origin.add(side.scale(-probe)),
+      3,
+      { roadsOnly: true },
+    );
+    const rightHit = raycastGrid(
+      world,
+      origin,
+      origin.add(side.scale(probe)),
+      3,
+      { roadsOnly: true },
+    );
+    const leftClear = leftHit ? origin.distance(leftHit) : probe;
+    const rightClear = rightHit ? origin.distance(rightHit) : probe;
+    const imbalance = rightClear - leftClear;
+    const minClear = Math.min(leftClear, rightClear);
+    const nearCurb = minClear < 20;
+    if (!nearCurb && Math.abs(imbalance) < 10) return;
+
+    const pull = Math.max(-1, Math.min(1, imbalance / probe));
+    const strength = nearCurb ? 0.65 : 0.3;
+    const desired = car.heading.add(side.scale(pull * strength));
+    if (desired.length() < 1e-4) return;
+    car.setDesiredHeading(
+      blendHeading(car.angle, desired.heading(), nearCurb ? 0.6 : 0.35),
+    );
   }
 
   applyDrive(
@@ -144,6 +188,14 @@ export class SteeringBehaviors {
     car.setDesiredHeading(blended);
 
     const angleError = Math.abs(wrapAngle(desiredHeading - car.angle));
+    const speed = car.vel.length();
+
+    // Emergency brake only — about to slam a wall. Never brake for turns/corners.
+    if (imminent && speed > 10) {
+      car.setBrake(0.95);
+      return;
+    }
+
     let throttle = 0.35 + config.aggression * 0.4;
     if (angleError > 0.9) throttle *= 0.28;
     else if (angleError > 0.5) throttle *= 0.5;
@@ -154,6 +206,36 @@ export class SteeringBehaviors {
     car.setThrottle(throttle);
   }
 
+  /**
+   * Hard brake when this car is closing fast on another body dead ahead.
+   * Returns true if brake was applied (caller should skip further drive tweaks).
+   */
+  emergencyBrakeForCars(
+    car: Car,
+    others: ReadonlyArray<{ pos: Vector2 }>,
+  ): boolean {
+    const speed = car.vel.length();
+    if (speed < 12) return false;
+    const heading = car.heading;
+    const stopDist = 28 + speed * 0.45;
+
+    for (const other of others) {
+      const to = other.pos.sub(car.pos);
+      const dist = to.length();
+      if (dist < 1e-3 || dist > stopDist) continue;
+      const along = to.normalize().dot(heading);
+      if (along < 0.65) continue; // not in front
+      car.setBrake(0.95);
+      return true;
+    }
+    return false;
+  }
+
+  /** Drop cached A* so the next followPath recomputes toward a new radio fix. */
+  invalidatePath(car: Car): void {
+    pathCaches.delete(car.body);
+  }
+
   followPath(
     car: Car,
     world: ChunkWorld,
@@ -162,14 +244,21 @@ export class SteeringBehaviors {
     _maxSpeed: number,
     pathStyle: PathStyle,
     dt = 1 / 60,
+    opts?: { roadsOnly?: boolean },
   ): void {
+    const roadsOnly = opts?.roadsOnly ?? false;
     let cache = pathCaches.get(car.body);
-    const goalMoved = !cache || cache.goal.distance(goal) > 55;
+    const modeChanged = !!cache && cache.roadsOnly !== roadsOnly;
+    const goalMoved = !cache || cache.goal.distance(goal) > 28;
     const stale = !cache || cache.age > 0.4 || cache.waypoints.length === 0;
 
-    if (!cache || goalMoved || stale) {
-      const waypoints = findPath(world, car.pos, goal);
-      cache = { waypoints, goal: goal.clone(), age: 0 };
+    if (!cache || goalMoved || stale || modeChanged) {
+      // Roads-only needs a wider search — arterials wind farther than lot cuts
+      const waypoints = findPath(world, car.pos, goal, {
+        roadsOnly,
+        maxNodes: roadsOnly ? 720 : 360,
+      });
+      cache = { waypoints, goal: goal.clone(), age: 0, roadsOnly };
       pathCaches.set(car.body, cache);
     } else {
       cache.age += dt;
@@ -190,22 +279,41 @@ export class SteeringBehaviors {
       const look = Math.min(cache.waypoints.length - 1, 2);
       target = cache.waypoints[look] ?? cache.waypoints[0] ?? goal;
       // If the look-ahead is LOS-blocked, use the nearer waypoint
-      const los = raycastGrid(world, car.pos, target, 5);
+      const los = raycastGrid(world, car.pos, target, 5, { roadsOnly });
       if (los && cache.waypoints[0]) {
         target = cache.waypoints[0];
       }
-      if (pathStyle === 'Chaotic') {
+      if (pathStyle === 'Chaotic' && !roadsOnly) {
         const rng = createRng(`wp|${idx}|${Math.floor(goal.x)}`);
         target = target.add(new Vector2((rng() - 0.5) * 6, (rng() - 0.5) * 6));
       }
     }
 
     let aim = target.sub(car.pos);
-    if (path.length === 0) {
+    if (roadsOnly) {
+      // Never fall back to open-lane probes through lots — stick to asphalt
+      const cell = world.worldToCell(car.pos.x, car.pos.y);
+      const onRoad = isRoadLike(world.getKind(cell.col, cell.row));
+      if (!onRoad) {
+        const road = nearestRoadPoint(world, car.pos, 16);
+        if (road) aim = road.sub(car.pos);
+      } else if (path.length === 0) {
+        const roadGoal = nearestRoadPoint(world, goal, 14) ?? goal;
+        aim = roadGoal.sub(car.pos);
+      }
+    } else if (path.length === 0) {
       const open = this.openLaneToward(car, world, goal);
       if (open) aim = open;
     }
-    const { steer: avoid, blocked, imminent } = this.avoidObstacle(car, world);
+    // Feelers only see real solids (buildings/rails). Lots are blocked by
+    // physics when roadsOnly — treating them as feeler walls made cops
+    // constantly "imminent" on the curb and refuse to chase.
+    const { steer: avoid, blocked, imminent } = this.avoidObstacle(
+      car,
+      world,
+      undefined,
+      false,
+    );
     this.applyDrive(
       car,
       aim.length() > 1e-3 ? aim : Vector2.fromAngle(car.angle),
@@ -214,6 +322,8 @@ export class SteeringBehaviors {
       imminent,
       config,
     );
+    // Feelers skip lots; without this, cars drift into the curb and scrape.
+    if (roadsOnly) this.keepCenteredOnRoad(car, world);
   }
 
   /** Pick a free feeler direction closest to the goal bearing. */

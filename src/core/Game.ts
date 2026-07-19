@@ -143,12 +143,20 @@ export class Game {
     return this.thief!.car.pos;
   }
 
-  /** Full speed on road/junction/bridge; crawl on sidewalk / open lots. */
-  private applySurface(car: Car): void {
+  /**
+   * Full speed on road/junction/bridge; crawl on sidewalk / open lots.
+   * Cops with banOffRoad (thief outside sense) get near-zero lot speed.
+   */
+  private applySurface(car: Car, opts?: { banOffRoad?: boolean }): void {
     if (!this.world) return;
     const cell = this.world.worldToCell(car.pos.x, car.pos.y);
     const kind = this.world.getKind(cell.col, cell.row);
-    car.surfaceSpeedScale = isRoadLike(kind) ? 1 : CAR.offRoadSpeedScale;
+    if (isRoadLike(kind)) {
+      car.surfaceSpeedScale = 1;
+      return;
+    }
+    // 0 = hard ban (Car treats surface < 0.05 as no drive)
+    car.surfaceSpeedScale = opts?.banOffRoad ? 0 : CAR.offRoadSpeedScale;
   }
 
   private update(dt: number): void {
@@ -167,19 +175,33 @@ export class Game {
     this.world.updateAround(focus.x, focus.y, 2);
     this.camera.follow(focus, this.canvas.width, this.canvas.height);
 
-    this.cops.update(dt, this.physics, this.world, focus);
+    const view = this.camera.worldBounds(this.canvas.width, this.canvas.height);
+    this.cops.update(dt, this.physics, this.world, focus, view);
     this.spills.update(dt, this.world, focus, this.survival);
 
+    this.thief.refreshThreatSense(this.cops.cops);
     this.thief.car.tractionMultiplier = this.spills.tractionAt(this.thief.car.pos);
-    this.applySurface(this.thief.car);
+    // Thief stays on road while any cop is inside their sense radius
+    this.applySurface(this.thief.car, { banOffRoad: this.thief.mustStayOnRoad });
     for (const cop of this.cops.cops) {
+      cop.refreshSense(this.thief.car.pos);
       cop.car.tractionMultiplier = this.spills.tractionAt(cop.car.pos);
-      this.applySurface(cop.car);
+      // Cops stay on roads unless the thief is inside this cop's sense radius
+      this.applySurface(cop.car, { banOffRoad: cop.mustStayOnRoad });
     }
+
+    // Visual → radio broadcast before AI so the whole pack shares one contact
+    this.cops.updateRadio(dt, this.world, this.thief);
 
     this.thief.update(dt, this.world, this.cops.cops, this.rng);
     for (const cop of this.cops.cops) {
-      cop.update(dt, this.world, this.thief);
+      cop.update(
+        dt,
+        this.world,
+        this.cops.radio,
+        this.cops.cops,
+        this.thief.car.pos,
+      );
     }
 
     stepPhysics(this.physics.engine, dt);
@@ -190,9 +212,14 @@ export class Game {
       Matter.Body.setAngularVelocity(cop.car.body, 0);
     }
 
-    resolveCarAgainstGrid(this.thief.car, this.world);
+    // Lots act as walls when roads-only — scrape the curb, no teleport loop
+    resolveCarAgainstGrid(this.thief.car, this.world, {
+      roadsOnly: this.thief.mustStayOnRoad,
+    });
     for (const cop of this.cops.cops) {
-      resolveCarAgainstGrid(cop.car, this.world);
+      resolveCarAgainstGrid(cop.car, this.world, {
+        roadsOnly: cop.mustStayOnRoad,
+      });
     }
 
     for (const cop of this.cops.cops) {
@@ -211,6 +238,8 @@ export class Game {
       this.survival,
       this.cops.cops.length,
       this.cops.getSpeedMultiplier(),
+      this.thief.nitroFill,
+      this.thief.isNitroActive,
     );
   }
 

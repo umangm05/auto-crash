@@ -17,13 +17,18 @@ The playfield is an **infinite 2D top-down world**, not a single screen-sized ma
 | **Desert** | Implemented, UI disabled | Open sand + rocks (re-enable later) |
 | **Rural** | Implemented, UI disabled | Dirt tracks + fields (re-enable later) |
 
-City paint lives in `src/map/cityRender.ts`. Arterials use **world-aligned**
-row/col periods so roads never dead-end at chunk borders. Junctions are only
-cells with both E–W and N–S road neighbors (dual-lane parallel neighbors alone
-do **not** count — that was painting zebra on whole streets). Rivers are
-world-aligned `GAP` bands; vertical roads become `BRIDGE` where they cross.
-Buildings are random axis-aligned rects. Off-road (OPEN lots) is still
-traversable but capped to ~32% speed so AI stays on asphalt.
+City paint lives in `src/map/cityRender.ts`. Layout targets an irregular urban
+grid (variable block sizes, major + local streets, T-cuts, stepped diagonal
+avenue, parks) via superblock street planning — not a uniform checkerboard.
+
+**Brown strip bug:** that was the `BRIDGE` deck. Bridges are short spans only on
+vertical street crossings; deck is black asphalt with rails over blue water.
+
+**Road cuts / zebra mess:** arm-carving T-breaks and per-cell zebra pads were
+removed. Roads are continuous full-span arterials again. Zebra is **one**
+aligned rectangle per H∩V cross (`collectIntersections`).
+
+Off-road (OPEN / PARK) is traversable but ~32% speed.
 
 Difficulty still scales obstacle density / AI presets.
 

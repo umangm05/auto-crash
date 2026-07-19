@@ -1,4 +1,11 @@
-import { CellKind, isRoadLike, type BuildingRect } from './biomes';
+import {
+  CellKind,
+  collectIntersections,
+  isCityHStreet,
+  isCityVStreet,
+  isRoadLike,
+  type BuildingRect,
+} from './biomes';
 
 const CELL_SIZE = 40;
 
@@ -10,9 +17,13 @@ export const CITY_PAINT = {
   zebra: '#f5f5f5',
   river: '#1a6fb5',
   riverDeep: '#0e4a7a',
-  bridge: '#6b6358',
-  bridgeRail: '#9a9080',
+  bridge: '#0a0a0a',
+  bridgeRail: '#c4b8a8',
+  park: '#2d5a3d',
+  parkLight: '#3a6b4a',
   buildingStroke: '#1a1f26',
+  rail: '#8a9099',
+  railDark: '#5a6068',
 } as const;
 
 type KindAt = (col: number, row: number) => CellKind;
@@ -21,36 +32,9 @@ function isDrive(kind: CellKind): boolean {
   return kind === CellKind.ROAD || kind === CellKind.JUNCTION || kind === CellKind.BRIDGE;
 }
 
-function dashLine(
-  ctx: CanvasRenderingContext2D,
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-  dash = 12,
-  gap = 10,
-): void {
-  const dx = x1 - x0;
-  const dy = y1 - y0;
-  const len = Math.hypot(dx, dy);
-  if (len < 1e-3) return;
-  const ux = dx / len;
-  const uy = dy / len;
-  let t = 0;
-  ctx.beginPath();
-  while (t < len) {
-    const a = t;
-    const b = Math.min(len, t + dash);
-    ctx.moveTo(x0 + ux * a, y0 + uy * a);
-    ctx.lineTo(x0 + ux * b, y0 + uy * b);
-    t += dash + gap;
-  }
-  ctx.stroke();
-}
-
 /**
- * City paint: black asphalt, white curbs, dashed lane split,
- * zebra ONLY on true junctions, blue river, bridges, rect buildings.
+ * City paint: continuous black asphalt, white curbs, dashed lane split,
+ * ONE zebra rectangle per arterial cross, blue river, bridges, buildings.
  */
 export function renderCityViewport(
   ctx: CanvasRenderingContext2D,
@@ -68,7 +52,24 @@ export function renderCityViewport(
   ctx.fillStyle = CITY_PAINT.sidewalk;
   ctx.fillRect(view.minX, view.minY, view.maxX - view.minX, view.maxY - view.minY);
 
-  // 2) River
+  // 2) Parks
+  for (let row = minR; row <= maxR; row++) {
+    for (let col = minC; col <= maxC; col++) {
+      if (getKind(col, row) !== CellKind.PARK) continue;
+      ctx.fillStyle = (col + row) % 2 === 0 ? CITY_PAINT.park : CITY_PAINT.parkLight;
+      ctx.fillRect(col * S, row * S, S, S);
+    }
+  }
+
+  // 2b) Roadside railing patches (impassable)
+  for (let row = minR; row <= maxR; row++) {
+    for (let col = minC; col <= maxC; col++) {
+      if (getKind(col, row) !== CellKind.RAIL) continue;
+      paintRailing(ctx, col, row, getKind, S);
+    }
+  }
+
+  // 3) River
   for (let row = minR; row <= maxR; row++) {
     for (let col = minC; col <= maxC; col++) {
       if (getKind(col, row) !== CellKind.GAP) continue;
@@ -83,17 +84,16 @@ export function renderCityViewport(
     }
   }
 
-  // 3) Solid black asphalt (roads + junctions + bridges)
+  // 4) Solid black asphalt
   for (let row = minR; row <= maxR; row++) {
     for (let col = minC; col <= maxC; col++) {
-      const kind = getKind(col, row);
-      if (!isDrive(kind)) continue;
-      ctx.fillStyle = kind === CellKind.BRIDGE ? CITY_PAINT.bridge : CITY_PAINT.asphalt;
+      if (!isDrive(getKind(col, row))) continue;
+      ctx.fillStyle = CITY_PAINT.asphalt;
       ctx.fillRect(col * S, row * S, S, S);
     }
   }
 
-  // 4) Lane markings on ROAD / BRIDGE only — never zebra here
+  // 5) Lane markings (skip junction cells — zebra owns those)
   ctx.lineCap = 'butt';
   for (let row = minR; row <= maxR; row++) {
     for (let col = minC; col <= maxC; col++) {
@@ -103,17 +103,15 @@ export function renderCityViewport(
     }
   }
 
-  // 5) Compact zebra pads only on JUNCTION cells
-  for (let row = minR; row <= maxR; row++) {
-    for (let col = minC; col <= maxC; col++) {
-      if (getKind(col, row) !== CellKind.JUNCTION) continue;
-      paintZebraPad(ctx, col, row, getKind, S);
-    }
+  // 6) One zebra pad per intersection (aligned to the full cross rect)
+  const crosses = collectIntersections(minC, maxC, minR, maxR);
+  for (const cross of crosses) {
+    paintIntersectionZebra(ctx, cross.col, cross.row, cross.w, cross.h, S);
   }
 
-  // 6) Bridge rails
+  // 7) Bridge rails
   ctx.strokeStyle = CITY_PAINT.bridgeRail;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2.5;
   for (let row = minR; row <= maxR; row++) {
     for (let col = minC; col <= maxC; col++) {
       if (getKind(col, row) !== CellKind.BRIDGE) continue;
@@ -140,7 +138,7 @@ export function renderCityViewport(
     }
   }
 
-  // 7) Buildings
+  // 8) Buildings
   for (const b of buildings) {
     const x = b.col * S + 2;
     const y = b.row * S + 2;
@@ -152,7 +150,7 @@ export function renderCityViewport(
     ctx.strokeStyle = CITY_PAINT.buildingStroke;
     ctx.lineWidth = 1.5;
     ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-    ctx.fillStyle = 'rgba(100, 180, 255, 0.15)';
+    ctx.fillStyle = 'rgba(100, 180, 255, 0.12)';
     const win = Math.min(7, Math.min(w, h) * 0.18);
     for (let wy = y + 5; wy < y + h - 5; wy += win + 5) {
       for (let wx = x + 5; wx < x + w - 5; wx += win + 5) {
@@ -160,6 +158,10 @@ export function renderCityViewport(
       }
     }
   }
+}
+
+function isLanePaint(kind: CellKind): boolean {
+  return kind === CellKind.ROAD || kind === CellKind.BRIDGE;
 }
 
 function paintLaneMarkings(
@@ -176,7 +178,7 @@ function paintLaneMarkings(
   const U = isRoadLike(getKind(col, row - 1));
   const D = isRoadLike(getKind(col, row + 1));
 
-  // White curb ONLY on edges that meet sidewalk / building / river (not other road)
+  // White curb only where road meets non-road
   ctx.strokeStyle = CITY_PAINT.mark;
   ctx.lineWidth = 2.5;
   ctx.beginPath();
@@ -198,35 +200,75 @@ function paintLaneMarkings(
   }
   ctx.stroke();
 
-  // Dashed lane split — one line, sparse dashes (not a zebra fill)
-  ctx.strokeStyle = 'rgba(232,232,232,0.85)';
+  // Dashed lane dividers — one line per shared edge so 2- and 3-lane strips
+  // get markings between every pair of lanes (not only the outer boundary).
+  ctx.strokeStyle = 'rgba(232,232,232,0.9)';
   ctx.lineWidth = 1.5;
+  const phase = ((col + row) * 7) % 24;
 
-  // Dual-lane E-W: dashed on the shared edge of the top cell only
-  if (U === false && D === true && (L || R)) {
-    dashLine(ctx, x + 4, y + S, x + S - 4, y + S, 14, 12);
-    return;
+  const hStreet = isCityHStreet(row);
+  const vStreet = isCityVStreet(col);
+  const onH = hStreet !== null;
+  const onV = vStreet !== null;
+
+  if (onH && !onV) {
+    // Pure E-W strip: divider on south edge when the cell below is the next lane
+    if (
+      hStreet!.width > 1 &&
+      isLanePaint(getKind(col, row + 1)) &&
+      isCityHStreet(row + 1)
+    ) {
+      dashLinePhased(ctx, x, y + S, x + S, y + S, phase);
+    } else if (hStreet!.width === 1) {
+      dashLinePhased(ctx, x, y + S / 2, x + S, y + S / 2, phase);
+    }
+  } else if (onV && !onH) {
+    // Pure N-S strip: divider on east edge when the cell to the right is the next lane
+    if (
+      vStreet!.width > 1 &&
+      isLanePaint(getKind(col + 1, row)) &&
+      isCityVStreet(col + 1)
+    ) {
+      dashLinePhased(ctx, x + S, y, x + S, y + S, phase);
+    } else if (vStreet!.width === 1) {
+      dashLinePhased(ctx, x + S / 2, y, x + S / 2, y + S, phase);
+    }
   }
-  // Dual-lane N-S: dashed on shared edge of left cell only
-  if (L === false && R === true && (U || D)) {
-    dashLine(ctx, x + S, y + 4, x + S, y + S - 4, 14, 12);
-    return;
-  }
-  // Single-lane E-W
-  if ((L || R) && !U && !D) {
-    dashLine(ctx, x + 4, y + S / 2, x + S - 4, y + S / 2, 14, 12);
-    return;
-  }
-  // Single-lane N-S
-  if ((U || D) && !L && !R) {
-    dashLine(ctx, x + S / 2, y + 4, x + S / 2, y + S - 4, 14, 12);
-  }
+  // Junction cells / H∩V overlaps: zebra owns the paint — no lane dashes
 }
 
-/**
- * Small crosswalk pad in the intersection — not a full-tile stripe wallpaper.
- */
-function paintZebraPad(
+function dashLinePhased(
+  ctx: CanvasRenderingContext2D,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  phase: number,
+): void {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-3) return;
+  const ux = dx / len;
+  const uy = dy / len;
+  const dash = 14;
+  const gap = 10;
+  const period = dash + gap;
+  let t = -((phase % period) + period) % period;
+  ctx.beginPath();
+  while (t < len) {
+    const a = Math.max(0, t);
+    const b = Math.min(len, t + dash);
+    if (b > a) {
+      ctx.moveTo(x0 + ux * a, y0 + uy * a);
+      ctx.lineTo(x0 + ux * b, y0 + uy * b);
+    }
+    t += period;
+  }
+  ctx.stroke();
+}
+
+function paintRailing(
   ctx: CanvasRenderingContext2D,
   col: number,
   row: number,
@@ -235,36 +277,64 @@ function paintZebraPad(
 ): void {
   const x = col * S;
   const y = row * S;
+  // Sidewalk under, metal rail on the road-facing edge
+  ctx.fillStyle = CITY_PAINT.sidewalk;
+  ctx.fillRect(x, y, S, S);
 
-  // Keep black asphalt under a small inset zebra
-  const L = getKind(col - 1, row) === CellKind.ROAD || getKind(col - 1, row) === CellKind.BRIDGE;
-  const R = getKind(col + 1, row) === CellKind.ROAD || getKind(col + 1, row) === CellKind.BRIDGE;
-  const U = getKind(col, row - 1) === CellKind.ROAD || getKind(col, row - 1) === CellKind.BRIDGE;
-  const D = getKind(col, row + 1) === CellKind.ROAD || getKind(col, row + 1) === CellKind.BRIDGE;
+  const roadR = isRoadLike(getKind(col + 1, row));
+  const roadL = isRoadLike(getKind(col - 1, row));
+  const roadD = isRoadLike(getKind(col, row + 1));
+  const roadU = isRoadLike(getKind(col, row - 1));
 
+  ctx.strokeStyle = CITY_PAINT.rail;
+  ctx.fillStyle = CITY_PAINT.railDark;
+  ctx.lineWidth = 3;
+
+  if (roadR || roadL) {
+    // Vertical railing along N-S road
+    const rx = roadR ? x + S - 5 : x + 2;
+    ctx.beginPath();
+    ctx.moveTo(rx, y + 2);
+    ctx.lineTo(rx, y + S - 2);
+    ctx.stroke();
+    for (let py = y + 6; py < y + S - 4; py += 10) {
+      ctx.fillRect(rx - 2, py, 5, 4);
+    }
+  } else if (roadU || roadD) {
+    const ry = roadD ? y + S - 5 : y + 2;
+    ctx.beginPath();
+    ctx.moveTo(x + 2, ry);
+    ctx.lineTo(x + S - 2, ry);
+    ctx.stroke();
+    for (let px = x + 6; px < x + S - 4; px += 10) {
+      ctx.fillRect(px, ry - 2, 4, 5);
+    }
+  } else {
+    // Fallback bar
+    ctx.fillRect(x + 4, y + S / 2 - 2, S - 8, 4);
+  }
+}
+
+/** Single aligned zebra covering the whole H∩V cross rectangle. */
+function paintIntersectionZebra(
+  ctx: CanvasRenderingContext2D,
+  col: number,
+  row: number,
+  wCells: number,
+  hCells: number,
+  S: number,
+): void {
+  const x = col * S;
+  const y = row * S;
+  const w = wCells * S;
+  const h = hCells * S;
+
+  // Vertical bars across the intersection (classic crosswalk look)
   ctx.fillStyle = CITY_PAINT.zebra;
-  const stripe = 3;
-  const gap = 3;
-
-  // Paint short crosswalk bands only on sides that face an incoming road (not another junction lane)
-  if (U) {
-    for (let i = 8; i < S - 8; i += stripe + gap) {
-      ctx.fillRect(x + i, y + 4, stripe, 8);
-    }
-  }
-  if (D) {
-    for (let i = 8; i < S - 8; i += stripe + gap) {
-      ctx.fillRect(x + i, y + S - 12, stripe, 8);
-    }
-  }
-  if (L) {
-    for (let i = 8; i < S - 8; i += stripe + gap) {
-      ctx.fillRect(x + 4, y + i, 8, stripe);
-    }
-  }
-  if (R) {
-    for (let i = 8; i < S - 8; i += stripe + gap) {
-      ctx.fillRect(x + S - 12, y + i, 8, stripe);
-    }
+  const bar = 5;
+  const gap = 5;
+  const inset = 3;
+  for (let px = inset; px < w - inset; px += bar + gap) {
+    ctx.fillRect(x + px, y + inset, bar, h - inset * 2);
   }
 }

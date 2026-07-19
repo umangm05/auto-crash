@@ -69,7 +69,7 @@ export class ChunkWorld {
     if (chunk) return chunk;
 
     // Bump version when city layout rules change so old seeds regenerate cleanly
-    const rng = createRng(`${this.seed}|${this.biome}|v3|${cc}|${cr}`);
+    const rng = createRng(`${this.seed}|${this.biome}|v8|${cc}|${cr}`);
     const gen = generateChunkCells(
       this.biome,
       cc,

@@ -18,9 +18,20 @@ export class HUD {
     this.set(0, 1, 1);
   }
 
-  set(survivalSec: number, cops: number, speedMult: number): void {
+  set(
+    survivalSec: number,
+    cops: number,
+    speedMult: number,
+    nitroFill = 1,
+    nitroActive = false,
+  ): void {
     this.timerEl.textContent = `SURVIVAL ${formatTime(survivalSec)}`;
-    this.infoEl.textContent = `COPS ${cops}  ·  SPEED ×${speedMult.toFixed(2)}`;
+    const nitroLabel = nitroActive
+      ? 'NITRO'
+      : nitroFill >= 1
+        ? 'NITRO READY'
+        : `NITRO ${Math.round(nitroFill * 100)}%`;
+    this.infoEl.textContent = `COPS ${cops}  ·  SPEED ×${speedMult.toFixed(2)}  ·  ${nitroLabel}`;
   }
 
   show(): void {

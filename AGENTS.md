@@ -145,11 +145,46 @@ Append an entry each time a design/structural decision is made. Format:
   rate** (no free spin), lateral grip/drift from `driftStability`, hard grid
   wall collisions (push-out + speed kill). Cops/thief **A\*** around buildings,
   long feelers + lane-center pull to **avoid** walls before impact. Top speed
-  ~58 px/s. Thief proximity glow/flee radius is **2×** cop sense. New cops
-  spawn on a timer until the cap; existing cops only teleport if truly lost
-  (very far) or wedged motionless for several seconds — not while cornering.
+  ~58 px/s. Throttle ∈ [-1, 1]: negative = brake (scrubs forward speed, no
+  reverse). Brakes are **emergency-only** — about-to-hit wall, or closing
+  hard on another car ahead (thief↔cop / cop↔cop). Not used for ordinary
+  corners. Thief baseline top speed is **1.1×** a base cop
+  (`GAMEPLAY.thiefSpeedMult`); cops still escalate via spawn cycles. Thief
+  **nitro**: AI pops a **1s** boost at **1.5×** thief speed when cops are in
+  the flee band, then **5s** refill. Engagement applies a forward kick +
+  `nitroAccelScale` and full throttle (emergency car-brake is skipped while
+  boosting so the speedup is visible). Thief proximity glow/flee radius is
+  **2×** cop sense.
+  New cops spawn on a timer until the cap. Cops **stay on roads** (roads-only
+  A* + near-zero lot speed) unless the thief is inside their sense radius,
+  then they may cut off-road. Off-screen catch-up is still 2× only on asphalt
+  (no teleport). Wedged cops only face the radio fix.
 - **Why:** Earlier velocity-blend + high angularVelocity made cars spin and
   clip through the map; real chase needs walls, corners, and readable speed.
+- **Date:** 2026-07-18.
+
+### Cop radio net
+- **Decision:** Cops do not omnisciently track the live thief. Match start seeds
+  a dispatch ping; thereafter any cop with sense-radius + clear grid LOS
+  broadcasts pos/vel on `CopRadio` (`revision` bumps on meaningful moves).
+  Every cop reads the shared radio; on each revision they invalidate A* and
+  hard-lock toward `radio.pos` (U-turn if the fix is behind them). Periodic
+  intel (`radioIntelIntervalSec`) also refreshes the contact. Soft flank /
+  ambush offsets only apply while the contact is stale.
+- **Why:** Blueprint §4.3; a visual must make the whole pack turn onto the
+  fix instead of continuing a stale forward path.
+- **Date:** 2026-07-18.
+- **Details:** [references/ARCHITECTURE.md](references/ARCHITECTURE.md).
+
+### Road discipline (cops vs thief)
+- **Decision:** Master switch `GAMEPLAY.allowOffRoad`. When **false**, thief
+  and cops are always roads-only. When **true**, sense-gated rules apply:
+  cops may leave asphalt only with the thief in *their* sense; thief must
+  stay on road while any cop is in *thief* sense. Roads-only pathing never
+  falls back to lot shortcuts. Off-screen cop catch-up still uses
+  `offScreenSpeedMult` (2×) only on asphalt; no teleport.
+- **Why:** Under pressure both sides stay on the street grid; the global flag
+  lets you lock the chase to asphalt entirely when lot cuts feel broken.
 - **Date:** 2026-07-18.
 
 ### Map variety
@@ -189,3 +224,46 @@ Append an entry each time a design/structural decision is made. Format:
   world-aligned continuous arterials (no stub alleys); off-road speed ~32%.
 - 2026-07-18: Dual-lane neighbor test still false-positive’d every cell as
   junction — junctions now use world arterial H∩V (`onCityHorizontal/Vertical`).
+- 2026-07-18: Brown band was over-painted `BRIDGE` (whole river). Bridges are
+  short V-street spans; city layout is irregular superblock streets + diagonal.
+- 2026-07-18: Zebra only on true 4-way / T (arm-count, dual-lane skipped).
+  T-junctions from world-space arterial arm breaks (~38% of crosses).
+- 2026-07-18: Reverted arm-cutting / diagonal (they shredded roads). Continuous
+  arterials again; one zebra rect per H∩V cross via `collectIntersections`.
+- 2026-07-18: Fewer roads (SUPER 36), denser buildings, sparse RAIL barriers;
+  thief force-turns when straight too long. Cops spawn randomly on a ring
+  (ahead-of-heading spawn reverted).
+- 2026-07-18: Cop radio — visual LOS broadcasts last-known thief pos/vel to
+  all units (`src/ai/CopRadio.ts`); pack no longer omniscient. Auto intel
+  refresh every 40s (`radioIntelIntervalSec`).
+- 2026-07-18: Thief speed set to 1.1× baseline cop (`thiefSpeedMult`).
+- 2026-07-18: Thief nitro — 1s at 1.5× speed, 5s refill; AI fires under threat.
+- 2026-07-18: Car braking — full `setBrake` / negative throttle; emergency-only
+  (imminent wall or car-ahead), not for ordinary turns.
+- 2026-07-18: Radio revision retarget — cops U-turn onto new fixes; off-screen
+  cops get 2× speed instead of teleport respawn.
+- 2026-07-18: Off-screen cops roads-only chase — A* rejects lots, recover to
+  asphalt first, 2× only on road, ban off-road crawl.
+- 2026-07-18: Cops always roads-only unless thief is in their sense radius.
+- 2026-07-18: Thief frontal evade — when a cop is ahead, cut sideways/reverse
+  (no brake+nitro into the threat).
+- 2026-07-18: Nitro actually accelerates — kick + accelScale + full throttle;
+  skip emergency brake while boosting.
+- 2026-07-18: Thief roads-only while any cop is in their sense radius
+  (opposite of cop off-road rule).
+- 2026-07-18: `GAMEPLAY.allowOffRoad` master switch (default false = always
+  asphalt); roads-only pathing no longer shortcuts through lots.
+- 2026-07-18: Fixed off-road ban — Car no longer floors surface at 0.15;
+  roads-only treats lots as walls (no teleport respawn loop). Larger spills
+  (`spillRadiusCells` ~2.4).
+- 2026-07-19: Multi-lane markings — dashed dividers between every lane on
+  2–3 wide arterials (majors are 3 lanes); city chunk seed bumped to v8.
+- 2026-07-19: Fixed cops not chasing on-screen — roads-only feelers treated
+  lots as walls and curb-braked forever; feelers are buildings-only again,
+  wider A*, radio snap restored.
+- 2026-07-19: Thief flee rewrite — road-axis escapes (no curb dive), turn
+  away from danger before nitro, sense-radius threats always commit evade.
+- 2026-07-19: Thief curb scrapes — feelers ignore lots (so cops don't
+  curb-brake), so thief had no lane-center pull vs asphalt walls; hard
+  evade snaps also aimed into the roadside. Added `keepCenteredOnRoad`,
+  blended evade turns, and escape scoring that prefers strip midline.

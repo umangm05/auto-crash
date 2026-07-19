@@ -1,24 +1,32 @@
-import Matter from 'matter-js';
 import { Vector2 } from '../core/Vector2';
 import type { Rng } from '../core/rng';
 import type { BehaviorConfig, CopRole } from '../core/types';
-import { GAMEPLAY } from '../config/GameConfig';
+import { GAMEPLAY, copSenseRadius } from '../config/GameConfig';
 import { Cop } from '../entities/Cop';
+import type { Thief } from '../entities/Thief';
 import type { ChunkWorld } from '../map/ChunkWorld';
 import { addBody, type PhysicsWorld } from '../physics/world';
+import { CopRadio } from './CopRadio';
 
 const ROLES: CopRole[] = ['lead', 'flank', 'ambush'];
 
+export interface ViewRect {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
 export class CopManager {
   readonly cops: Cop[] = [];
+  readonly radio = new CopRadio();
   private spawnTimer = 0;
+  private intelTimer = 0;
   private cycles = 0;
   private speedMultiplier = 1;
   private readonly config: BehaviorConfig;
   private readonly rng: Rng;
-  /** Per-cop stuck timers (same index as cops[]). */
   private stuckSec: number[] = [];
-  /** Last positions for stuck displacement checks. */
   private lastPos: Vector2[] = [];
 
   constructor(config: BehaviorConfig, rng: Rng) {
@@ -26,26 +34,82 @@ export class CopManager {
     this.rng = rng;
   }
 
-  /** Spawn the initial lead cop near the thief (just off camera). */
+  /** Spawn the initial lead cop; seed radio with a dispatch ping on the thief. */
   spawnInitial(physics: PhysicsWorld, world: ChunkWorld, near: Vector2): void {
+    this.radio.dispatch(near);
+    this.intelTimer = 0;
     this.spawnAround(physics, world, near);
   }
 
-  update(dt: number, physics: PhysicsWorld, world: ChunkWorld, near: Vector2): void {
-    // Only recover cops that are truly lost / wedged — never mid-chase
-    this.recoverLostCops(world, near, dt);
+  /**
+   * Age the radio, accept visual broadcasts, and every
+   * `radioIntelIntervalSec` push a guaranteed intel refresh.
+   */
+  updateRadio(dt: number, world: ChunkWorld, thief: Thief): void {
+    this.radio.tick(dt);
+
+    let spotted = false;
+    for (const cop of this.cops) {
+      cop.car.proximityRadius = copSenseRadius(cop.car.config.proximityPanic);
+      cop.hasVisual = cop.canSee(world, thief.car.pos);
+      if (cop.hasVisual) spotted = true;
+    }
+
+    if (spotted) {
+      this.radio.report(thief.car.pos, thief.car.vel);
+    }
+
+    this.intelTimer += dt;
+    if (this.intelTimer >= GAMEPLAY.radioIntelIntervalSec) {
+      this.intelTimer = 0;
+      this.radio.report(thief.car.pos, thief.car.vel);
+    }
+  }
+
+  update(
+    dt: number,
+    physics: PhysicsWorld,
+    world: ChunkWorld,
+    near: Vector2,
+    view: ViewRect,
+  ): void {
+    this.applyOffScreenSpeeds(view, world);
+    this.unwedgeCops(dt);
 
     this.spawnTimer += dt;
     if (this.spawnTimer < GAMEPLAY.copSpawnIntervalSec) return;
     this.spawnTimer = 0;
 
     if (this.cops.length >= GAMEPLAY.maxCops) {
-      // At cap: just pressure via speed — do not teleport an active chaser
       this.bumpSpeed();
       return;
     }
     this.spawnAround(physics, world, near);
     this.bumpSpeed();
+  }
+
+  /**
+   * Mark viewport membership; 2× catch-up only while off-screen AND on asphalt
+   * so the boost cannot power cops through building lots.
+   */
+  private applyOffScreenSpeeds(view: ViewRect, world: ChunkWorld): void {
+    for (const cop of this.cops) {
+      const p = cop.car.pos;
+      const onScreen =
+        p.x >= view.minX &&
+        p.x <= view.maxX &&
+        p.y >= view.minY &&
+        p.y <= view.maxY;
+      cop.offScreen = !onScreen;
+      cop.refreshOnRoad(world);
+      this.applyCopSpeed(cop);
+    }
+  }
+
+  private applyCopSpeed(cop: Cop): void {
+    const boost =
+      cop.offScreen && cop.onRoad ? GAMEPLAY.offScreenSpeedMult : 1;
+    cop.car.speedMultiplier = this.speedMultiplier * boost;
   }
 
   private bumpSpeed(): void {
@@ -55,23 +119,18 @@ export class CopManager {
       this.speedMultiplier * (1 + GAMEPLAY.copSpeedGrowthPerCycle),
     );
     for (const cop of this.cops) {
-      cop.car.speedMultiplier = this.speedMultiplier;
+      this.applyCopSpeed(cop);
     }
   }
 
-  /**
-   * Teleport only if:
-   * - way off the chase (far beyond camera), or
-   * - physically wedged (almost no speed AND almost no movement for several seconds).
-   * Slow cornering while chasing must NOT trigger this.
-   */
-  private recoverLostCops(world: ChunkWorld, near: Vector2, dt: number): void {
+  /** Face radio if wedged — never teleport/respawn (interferes with chase logic). */
+  private unwedgeCops(dt: number): void {
+    const anchor = this.radio.hasContact ? this.radio.pos : null;
+
     for (let i = 0; i < this.cops.length; i++) {
       const cop = this.cops[i]!;
       const pos = cop.car.pos;
-      const dist = pos.distance(near);
       const speed = cop.car.vel.length();
-
       const prev = this.lastPos[i] ?? pos;
       const moved = pos.distance(prev);
       this.lastPos[i] = pos.clone();
@@ -84,38 +143,15 @@ export class CopManager {
         this.stuckSec[i] = 0;
       }
 
-      const tooFar = dist > GAMEPLAY.copRespawnDistance;
-      const wedged = (this.stuckSec[i] ?? 0) >= GAMEPLAY.copStuckTimeSec;
-      if (!tooFar && !wedged) continue;
-
-      this.teleportCop(cop, world, near);
+      if ((this.stuckSec[i] ?? 0) < GAMEPLAY.copStuckTimeSec) continue;
+      if (anchor) cop.car.faceToward(anchor);
       this.stuckSec[i] = 0;
-      this.lastPos[i] = cop.car.pos.clone();
     }
   }
 
-  private teleportCop(cop: Cop, world: ChunkWorld, near: Vector2): void {
-    const angle = this.rng() * Math.PI * 2;
-    const dist = GAMEPLAY.copSpawnDistance * (0.85 + this.rng() * 0.3);
-    const raw = new Vector2(
-      near.x + Math.cos(angle) * dist,
-      near.y + Math.sin(angle) * dist,
-    );
-    const spawn = world.findSpawnNear(raw.x, raw.y, 14);
-    Matter.Body.setPosition(cop.car.body, { x: spawn.x, y: spawn.y });
-    Matter.Body.setVelocity(cop.car.body, { x: 0, y: 0 });
-    Matter.Body.setAngularVelocity(cop.car.body, 0);
-    cop.car.faceToward(near);
-  }
-
+  /** Random angle around the thief, outside the camera band, with min-distance guard. */
   private spawnAround(physics: PhysicsWorld, world: ChunkWorld, near: Vector2): void {
-    const angle = this.rng() * Math.PI * 2;
-    const dist = GAMEPLAY.copSpawnDistance * (0.85 + this.rng() * 0.3);
-    const raw = new Vector2(
-      near.x + Math.cos(angle) * dist,
-      near.y + Math.sin(angle) * dist,
-    );
-    const spawn = world.findSpawnNear(raw.x, raw.y, 14);
+    const spawn = this.pickRingSpawn(world, near);
     const index = this.cops.length;
     const role = ROLES[index % ROLES.length]!;
     const cop = new Cop(
@@ -127,11 +163,38 @@ export class CopManager {
       role,
       this.speedMultiplier,
     );
-    cop.car.faceToward(near);
+    const face = this.radio.hasContact ? this.radio.pos : near;
+    cop.car.faceToward(face);
+    // Fresh units start off-screen on asphalt → 2× until they enter the view
+    cop.offScreen = true;
+    cop.refreshOnRoad(world);
+    this.applyCopSpeed(cop);
     addBody(physics.world, cop.car.body);
     this.cops.push(cop);
     this.stuckSec.push(0);
     this.lastPos.push(cop.car.pos.clone());
+  }
+
+  private pickRingSpawn(world: ChunkWorld, near: Vector2): Vector2 {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const angle = this.rng() * Math.PI * 2;
+      const dist =
+        GAMEPLAY.copSpawnDistance *
+        (0.9 + this.rng() * 0.25) *
+        (1 + attempt * 0.08);
+      const raw = new Vector2(
+        near.x + Math.cos(angle) * dist,
+        near.y + Math.sin(angle) * dist,
+      );
+      const spawn = world.findSpawnNear(raw.x, raw.y, 12);
+      if (spawn.distance(near) >= GAMEPLAY.copSpawnMinDistance) return spawn;
+    }
+    const angle = this.rng() * Math.PI * 2;
+    const fallback = new Vector2(
+      near.x + Math.cos(angle) * GAMEPLAY.copSpawnDistance * 1.4,
+      near.y + Math.sin(angle) * GAMEPLAY.copSpawnDistance * 1.4,
+    );
+    return world.findSpawnNear(fallback.x, fallback.y, 16);
   }
 
   getSpeedMultiplier(): number {
@@ -140,5 +203,10 @@ export class CopManager {
 
   getCycles(): number {
     return this.cycles;
+  }
+
+  /** True if any cop has a clear visual this frame. */
+  hasVisualContact(): boolean {
+    return this.cops.some((c) => c.hasVisual);
   }
 }

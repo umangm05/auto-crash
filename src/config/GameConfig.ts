@@ -52,21 +52,42 @@ export const STEERING = {
 
 export const GAMEPLAY = {
   copSpawnIntervalSec: 10,
+  /** Periodic intel ping — refreshes radio even without a visual */
+  radioIntelIntervalSec: 2,
   spillIntervalSec: 20,
+  /** Spill ellipse radius in world cells (was ~0.7). */
+  spillRadiusCells: 2.4,
   copSpeedGrowthPerCycle: 0.03,
   /** Hard cap so late-game cops don't become rockets */
   maxCopSpeedMult: 1.35,
+  /** Thief top-speed multiplier vs a baseline cop (speedMult 1) */
+  thiefSpeedMult: 1.1,
+  /** Nitro: active duration, refill after boost ends, speed while boosting */
+  nitroDurationSec: 1,
+  nitroCooldownSec: 5,
+  nitroSpeedMult: 0.4,
+  /** Extra accel while nitro is burning (base accel is too weak to hit 1.5× in 1s). */
+  nitroAccelScale: 2.4,
   /** Cop proximity glow / sense baseline */
-  baseCopSenseRadius: 140,
-  /** Thief proximity is always 2× cop baseline */
-  baseFleeRadius: 280,
-  maxCops: 8,
-  copSpawnDistance: 420,
+  baseCopSenseRadius: 200,
+  /** Thief proximity is always 1.5x cop baseline */
+  baseFleeRadius: 300,
+  maxCops: 10,
+  /** Preferred spawn distance on a ring around the thief — beyond a typical viewport edge */
+  copSpawnDistance: 1000,
+  /** Never place a cop closer than this (avoids instant catch after road snap) */
+  copSpawnMinDistance: 800,
   /**
-   * Only teleport a cop that has completely left the chase (far off-camera).
-   * Do NOT use this for normal cornering / slow turns.
+   * When true, sense-gated off-road is allowed (cops cut lots only with thief
+   * in sense; thief stays on road only while cops are in sense).
+   * When false, thief and cops are always roads-only — no lot driving.
    */
-  copRespawnDistance: 1400,
+  allowOffRoad: false,
+  /**
+   * Off-screen catch-up multiplier — only while the cop is on asphalt.
+   * Off-screen cops also use roads-only A* (no lot cutting).
+   */
+  offScreenSpeedMult: 2,
   /** Must stay nearly motionless this long before counting as wedged. */
   copStuckSpeed: 2.5,
   copStuckTimeSec: 8,
@@ -115,7 +136,8 @@ export const DIFFICULTY_PRESETS: Record<
 };
 
 export function topSpeed(aggression: number, speedMult = 1): number {
-  return CAR.maxSpeed * Math.min(GAMEPLAY.maxCopSpeedMult, speedMult) * (0.65 + aggression * 0.4);
+  // Cop escalation is capped at assignment time; thief nitro may exceed that.
+  return CAR.maxSpeed * speedMult * (0.65 + aggression * 0.4);
 }
 
 export function fleeRadiusFromPanic(proximityPanic: number): number {

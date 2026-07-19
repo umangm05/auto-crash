@@ -1,6 +1,7 @@
 import { Vector2 } from '../core/Vector2';
 import { createRng, randInt } from '../core/rng';
 import { COLORS, GAMEPLAY } from '../config/GameConfig';
+import { isRoadLike } from './biomes';
 import type { ChunkWorld } from './ChunkWorld';
 
 export interface Spill {
@@ -31,20 +32,24 @@ export class RoadSpillManager {
   private spawnSpill(world: ChunkWorld, focus: Vector2, elapsed: number): void {
     const rng = createRng(`${this.rngSeed}|spill|${Math.floor(elapsed)}`);
     const origin = world.worldToCell(focus.x, focus.y);
-    const candidates: Array<{ col: number; row: number }> = [];
-    for (let r = -8; r <= 8; r++) {
-      for (let c = -8; c <= 8; c++) {
+    const roadCandidates: Array<{ col: number; row: number }> = [];
+    const anyCandidates: Array<{ col: number; row: number }> = [];
+    for (let r = -10; r <= 10; r++) {
+      for (let c = -10; c <= 10; c++) {
         const col = origin.col + c;
         const row = origin.row + r;
-        if (world.isWalkable(col, row)) candidates.push({ col, row });
+        if (!world.isWalkable(col, row)) continue;
+        anyCandidates.push({ col, row });
+        if (isRoadLike(world.getKind(col, row))) roadCandidates.push({ col, row });
       }
     }
-    if (!candidates.length) return;
-    const pick = candidates[randInt(rng, 0, candidates.length)]!;
+    const pool = roadCandidates.length ? roadCandidates : anyCandidates;
+    if (!pool.length) return;
+    const pick = pool[randInt(rng, 0, pool.length)]!;
     if (this.spills.length >= 4) this.spills.shift();
     this.spills.push({
       center: world.cellCenter(pick.col, pick.row),
-      radius: world.cellSize * 0.7,
+      radius: world.cellSize * GAMEPLAY.spillRadiusCells,
     });
   }
 

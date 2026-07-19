@@ -10,22 +10,43 @@ interface Node {
   parent: Node | null;
 }
 
+export interface FindPathOptions {
+  maxNodes?: number;
+  /** When true, only ROAD / JUNCTION / BRIDGE cells are traversable. */
+  roadsOnly?: boolean;
+}
+
 function key(col: number, row: number): string {
   return `${col},${row}`;
 }
 
-/** Bounded A* — routes around BLOCK cells; prefers roads when available. */
+function cellAllowed(world: ChunkWorld, col: number, row: number, roadsOnly: boolean): boolean {
+  if (!world.isWalkable(col, row)) return false;
+  if (!roadsOnly) return true;
+  return isRoadLike(world.getKind(col, row));
+}
+
+/** Bounded A* — routes around BLOCK cells; prefers roads (or roads-only). */
 export function findPath(
   world: ChunkWorld,
   start: Vector2,
   goal: Vector2,
-  maxNodes = 360,
+  maxNodesOrOpts: number | FindPathOptions = 360,
 ): Vector2[] {
+  const opts: FindPathOptions =
+    typeof maxNodesOrOpts === 'number' ? { maxNodes: maxNodesOrOpts } : maxNodesOrOpts;
+  const maxNodes = opts.maxNodes ?? 360;
+  const roadsOnly = opts.roadsOnly ?? false;
+
   const s = world.worldToCell(start.x, start.y);
   const g = world.worldToCell(goal.x, goal.y);
 
-  const startCell = nearestWalkable(world, s.col, s.row, 6);
-  let goalCell = nearestWalkable(world, g.col, g.row, 6);
+  const startCell = roadsOnly
+    ? nearestRoad(world, s.col, s.row, 14)
+    : nearestWalkable(world, s.col, s.row, 6);
+  let goalCell = roadsOnly
+    ? nearestRoad(world, g.col, g.row, 14)
+    : nearestWalkable(world, g.col, g.row, 6);
   if (!startCell || !goalCell) return [];
 
   // Clamp goal to a nearby waypoint if too far
@@ -35,7 +56,9 @@ export function findPath(
     const dirC = Math.sign(goalCell.col - startCell.col);
     const dirR = Math.sign(goalCell.row - startCell.row);
     goalCell =
-      nearestWalkable(world, startCell.col + dirC * 18, startCell.row + dirR * 18, 6) ??
+      (roadsOnly
+        ? nearestRoad(world, startCell.col + dirC * 18, startCell.row + dirR * 18, 10)
+        : nearestWalkable(world, startCell.col + dirC * 18, startCell.row + dirR * 18, 6)) ??
       goalCell;
   }
 
@@ -80,17 +103,18 @@ export function findPath(
     }
 
     for (const n of world.neighbors4(current.col, current.row)) {
-      if (!world.isWalkable(n.col, n.row)) continue;
+      if (!cellAllowed(world, n.col, n.row, roadsOnly)) continue;
+      const span = roadsOnly ? 48 : 26;
       if (
-        Math.abs(n.col - startCell.col) > 26 ||
-        Math.abs(n.row - startCell.row) > 26
+        Math.abs(n.col - startCell.col) > span ||
+        Math.abs(n.row - startCell.row) > span
       ) {
         continue;
       }
       const nk = key(n.col, n.row);
       if (closed.has(nk)) continue;
-      // Strongly prefer asphalt — open lots are walkable but slow / costly
-      const stepCost = isRoadLike(world.getKind(n.col, n.row)) ? 1 : 4.5;
+      const kind = world.getKind(n.col, n.row);
+      const stepCost = roadsOnly ? 1 : isRoadLike(kind) ? 1 : 4.5;
       const tg = current.g + stepCost;
       const existing = openMap.get(nk);
       if (!existing || tg < existing.g) {
@@ -151,6 +175,34 @@ export function nearestWalkable(
     }
   }
   return null;
+}
+
+/** Nearest ROAD / JUNCTION / BRIDGE cell (spiral search). */
+export function nearestRoad(
+  world: ChunkWorld,
+  col: number,
+  row: number,
+  maxR = 14,
+): { col: number; row: number } | null {
+  if (isRoadLike(world.getKind(col, row))) return { col, row };
+  for (let r = 1; r <= maxR; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+        const c = col + dx;
+        const rr = row + dy;
+        if (isRoadLike(world.getKind(c, rr))) return { col: c, row: rr };
+      }
+    }
+  }
+  return null;
+}
+
+/** World-space center of the nearest road cell to a point. */
+export function nearestRoadPoint(world: ChunkWorld, pos: Vector2, maxR = 14): Vector2 | null {
+  const cell = world.worldToCell(pos.x, pos.y);
+  const road = nearestRoad(world, cell.col, cell.row, maxR);
+  return road ? world.cellCenter(road.col, road.row) : null;
 }
 
 export function nearestIntersectionAhead(

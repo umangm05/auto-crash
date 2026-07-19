@@ -30,6 +30,8 @@ export class Car {
   tractionMultiplier = 1;
   /** 1 on asphalt/bridge; lower on sidewalk / open lots. */
   surfaceSpeedScale = 1;
+  /** Extra accel scale (nitro uses >1 so the boost is felt within 1s). */
+  accelScale = 1;
   proximityRadius = 120;
   private readonly rng: Rng;
   private throttle = 0;
@@ -95,12 +97,50 @@ export class Car {
     this.desiredHeading = wrapAngle(this.angle + this.turnIntent * 1.2);
   }
 
+  /**
+   * Drive input: `1` full throttle, `0` coast, `-1` full brake.
+   * Negative values decelerate along forward speed (no reverse drive).
+   */
   setThrottle(amount: number): void {
-    this.throttle = Math.max(-0.3, Math.min(1, amount));
+    this.throttle = Math.max(-1, Math.min(1, amount));
+  }
+
+  /** Brake intensity 0..1 (convenience wrapper over negative throttle). */
+  setBrake(amount: number): void {
+    this.setThrottle(-Math.max(0, Math.min(1, amount)));
   }
 
   setDesiredHeading(radians: number): void {
     this.desiredHeading = radians;
+  }
+
+  getThrottle(): number {
+    return this.throttle;
+  }
+
+  /**
+   * Instant forward kick toward the current speed cap — used when nitro
+   * engages so the boost is visible immediately (accel alone is too slow).
+   */
+  applySpeedKick(factor = 0.55): void {
+    const surface = Math.max(0, Math.min(1, this.surfaceSpeedScale));
+    if (surface < 0.05) return;
+    const maxSpd = topSpeed(this.config.aggression, this.speedMultiplier) * surface;
+    const heading = this.heading;
+    let vx = this.body.velocity.x;
+    let vy = this.body.velocity.y;
+    const forward = vx * heading.x + vy * heading.y;
+    const targetFwd = Math.min(maxSpd, Math.max(forward, forward + (maxSpd - Math.max(0, forward)) * factor));
+    const delta = targetFwd - forward;
+    if (delta <= 0.5) return;
+    vx += heading.x * delta;
+    vy += heading.y * delta;
+    const spd = Math.hypot(vx, vy);
+    if (spd > maxSpd && spd > 1e-6) {
+      vx = (vx / spd) * maxSpd;
+      vy = (vy / spd) * maxSpd;
+    }
+    Matter.Body.setVelocity(this.body, { x: vx, y: vy });
   }
 
   applyForce(_force: Vector2): void {
@@ -109,11 +149,15 @@ export class Car {
 
   integrateControls(dt: number): void {
     const speedNow = this.vel.length();
-    const surface = Math.max(0.15, Math.min(1, this.surfaceSpeedScale));
-    const maxSpd = topSpeed(this.config.aggression, this.speedMultiplier) * surface;
+    // Do NOT floor surface at 0.15 — that broke allowOffRoad / roads-only bans
+    const surface = Math.max(0, Math.min(1, this.surfaceSpeedScale));
+    const banned = surface < 0.05;
+    const maxSpd = banned
+      ? 0
+      : topSpeed(this.config.aggression, this.speedMultiplier) * Math.max(surface, 0.15);
 
     // Turn rate drops at speed (real-car feel); low driftStability = looser / more oversteer
-    const speedFactor = 1 - Math.min(0.75, speedNow / Math.max(1, maxSpd)) * 0.7;
+    const speedFactor = 1 - Math.min(0.75, speedNow / Math.max(1, maxSpd || 1)) * 0.7;
     const stability = 0.35 + this.config.driftStability * 0.65;
     let turnRate = CAR.maxTurnRate * speedFactor * (0.7 + stability * 0.5);
 
@@ -135,15 +179,39 @@ export class Car {
     let vy = this.body.velocity.y;
     const forwardSpeed = vx * heading.x + vy * heading.y;
 
-    if (this.throttle > 0) {
+    if (banned) {
+      // Roads-only ban: kill speed; Game will snap back onto asphalt
+      const hold = 1 - Math.min(0.95, 10 * dt);
+      vx *= hold;
+      vy *= hold;
+    } else if (this.throttle > 0) {
       const room = Math.max(0, maxSpd - Math.max(0, forwardSpeed));
       const a =
-        CAR.accel * this.throttle * (0.55 + this.config.aggression * 0.6) * (0.55 + surface * 0.45);
+        CAR.accel *
+        this.accelScale *
+        this.throttle *
+        (0.55 + this.config.aggression * 0.6) *
+        (0.55 + surface * 0.45);
       vx += heading.x * a * dt * (room > 0 || forwardSpeed < 0 ? 1 : 0.15);
       vy += heading.y * a * dt * (room > 0 || forwardSpeed < 0 ? 1 : 0.15);
     } else if (this.throttle < 0) {
-      vx += heading.x * CAR.brake * this.throttle * dt;
-      vy += heading.y * CAR.brake * this.throttle * dt;
+      // True braking: scrub forward speed; do not reverse-drive
+      const brakePower = -this.throttle;
+      const decel =
+        CAR.brake *
+        brakePower *
+        (0.65 + this.config.driftStability * 0.35) *
+        (0.55 + surface * 0.45) *
+        this.tractionMultiplier;
+      if (forwardSpeed > 0.4) {
+        const kill = Math.min(forwardSpeed, decel * dt);
+        vx -= heading.x * kill;
+        vy -= heading.y * kill;
+      } else {
+        const hold = 1 - Math.min(0.95, 4.5 * brakePower * dt);
+        vx *= hold;
+        vy *= hold;
+      }
     } else {
       // coast
       vx *= 1 - CAR.coastDrag * dt;
@@ -151,7 +219,7 @@ export class Car {
     }
 
     // Off-road: heavy drag so leaving asphalt feels sluggish
-    if (surface < 0.99) {
+    if (!banned && surface < 0.99) {
       const drag = 1 - Math.min(0.85, CAR.offRoadDrag * (1 - surface) * dt);
       vx *= drag;
       vy *= drag;
