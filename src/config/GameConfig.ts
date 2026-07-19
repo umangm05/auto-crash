@@ -87,7 +87,7 @@ export const GAMEPLAY = {
    * Off-screen catch-up multiplier — only while the cop is on asphalt.
    * Off-screen cops also use roads-only A* (no lot cutting).
    */
-  offScreenSpeedMult: 2,
+  offScreenSpeedMult: 2.75,
   /** Must stay nearly motionless this long before counting as wedged. */
   copStuckSpeed: 2.5,
   /** Faster unwedge — curb pins used to sit for 8s doing nothing useful. */

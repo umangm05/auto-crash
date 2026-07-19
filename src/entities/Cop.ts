@@ -94,7 +94,7 @@ export class Cop {
 
     const roadsOnly = this.mustStayOnRoad;
 
-    if (!radio.hasContact) {
+    if (!radio.hasContact && !thiefPosLive) {
       const wander = roadsOnly
         ? (nearestRoadPoint(world, this.car.pos.add(this.car.heading.scale(80)), 12) ??
           this.car.pos.add(this.car.heading.scale(80)))
@@ -122,10 +122,14 @@ export class Cop {
     }
     if (this.directChaseSec > 0) this.directChaseSec -= dt;
 
-    const thiefPos = radio.pos;
-    const thiefVel = radio.vel;
+    // Path toward the live thief when known — radio alone lagged and wandered
+    const thiefPos = thiefPosLive ?? radio.pos;
+    const thiefVel = thiefPosLive ? Vector2.zero() : radio.vel;
     const lockOn =
-      this.hasVisual || this.directChaseSec > 0 || radio.ageSec < 0.35;
+      this.hasVisual ||
+      this.directChaseSec > 0 ||
+      radio.ageSec < 0.35 ||
+      !!thiefPosLive;
 
     let chase = thiefPos;
 
@@ -160,20 +164,20 @@ export class Cop {
       chase,
       config,
       maxSpeed,
-      config.pathStyle,
+      'Linear', // chase ignores Chaotic wander — go at the thief
       dt,
-      { roadsOnly },
+      { roadsOnly, chase: true },
     );
 
-    // Commit heading onto the *road path*, not crow-flies radio.
-    // Snapping at chase through lots pinned cops on curbs forever.
+    // Commit onto the road route (look ahead) so packs close distance
     if (roadsOnly) {
-      const wp = steering.nextWaypoint(this.car);
-      if (wp) {
-        this.snapTowardTarget(wp, radioUpdated || lockOn || this.hasVisual);
-      }
+      const wp =
+        steering.nextWaypoint(this.car, 2) ?? steering.nextWaypoint(this.car, 0);
+      if (wp) this.snapTowardTarget(wp, true);
+      // Keep throttle up after snap (snap only nudges heading)
+      if (this.car.getThrottle() < 0.7) this.car.setThrottle(0.85);
     } else {
-      this.snapTowardTarget(chase, radioUpdated || lockOn || this.hasVisual);
+      this.snapTowardTarget(chase, true);
     }
 
     const others = [];
@@ -195,7 +199,7 @@ export class Cop {
 
     this.car.setDesiredHeading(desired);
     if (along < 0.25) {
-      this.car.setThrottle(0.7);
+      this.car.setThrottle(0.75);
     }
   }
 

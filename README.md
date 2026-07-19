@@ -39,6 +39,6 @@ npm run preview  # serve the production build
 4. Pick **biome**: City (roads/junctions), Desert (open, no roads), Rural (winding tracks).
 5. Optionally set a **map seed** (same seed → same chunk layout).
 6. Tune Aggression, Drift Stability, Proximity Panic, Path Style — or click **Generate from text** (requires WebGPU; large first-time model download). Sliders still affect top speed / grip in Manual.
-7. **Start Chase**. Camera follows the thief. Cops spawn near the action; road spills cut local traction. Soft glow circles show proximity radii.
+7. **Start Chase**. Camera follows the thief. Cops spawn near the action; road spills cut local traction. Soft glow circles show proximity radii. Off-screen cops appear as pulsing red/blue dots on the screen edge.
 
 Manual sliders always work if WebLLM / WebGPU is unavailable.

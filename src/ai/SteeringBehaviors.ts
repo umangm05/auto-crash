@@ -164,26 +164,28 @@ export class SteeringBehaviors {
     blocked: boolean,
     imminent: boolean,
     config: BehaviorConfig,
+    opts?: { chase?: boolean },
   ): void {
+    const chase = opts?.chase ?? false;
     let dir = aim;
     if (avoid.length() > 1e-4) {
       // Prioritize avoidance — don't aim through walls
-      const avoidBias = imminent ? 2.4 : blocked ? 1.9 : 1.25;
-      const aimScale = imminent ? 0.15 : blocked ? 0.3 : 0.85;
+      const avoidBias = imminent ? 2.4 : blocked ? 1.9 : chase ? 1.05 : 1.25;
+      const aimScale = imminent ? 0.15 : blocked ? 0.3 : chase ? 1 : 0.85;
       dir = aim.normalize().scale(aimScale).add(avoid.scale(avoidBias));
     }
-    if (config.pathStyle === 'Chaotic') {
+    if (config.pathStyle === 'Chaotic' && !chase) {
       const rng = createRng(`${Math.floor(car.pos.x / 40)}|${Math.floor(car.pos.y / 40)}|chaos`);
       dir = dir.add(new Vector2(gaussian(rng), gaussian(rng)).scale(0.14));
     }
 
     if (dir.length() < 1e-4) {
-      car.setThrottle(0.12);
+      car.setThrottle(chase ? 0.55 : 0.12);
       return;
     }
 
     const desiredHeading = dir.heading();
-    const blend = imminent ? 0.7 : blocked ? 0.55 : 0.4;
+    const blend = imminent ? 0.7 : blocked ? 0.55 : chase ? 0.55 : 0.4;
     const blended = blendHeading(car.angle, desiredHeading, blend);
     car.setDesiredHeading(blended);
 
@@ -196,12 +198,22 @@ export class SteeringBehaviors {
       return;
     }
 
-    let throttle = 0.35 + config.aggression * 0.4;
-    if (angleError > 0.9) throttle *= 0.28;
-    else if (angleError > 0.5) throttle *= 0.5;
-    if (blocked) throttle *= 0.18;
-    if (imminent) throttle *= 0.35;
-    if (angleError > 2.2) throttle = 0.08;
+    let throttle = chase
+      ? 0.72 + config.aggression * 0.28
+      : 0.35 + config.aggression * 0.4;
+    if (chase) {
+      // Keep pressing through corners — cops were crawling on every turn
+      if (angleError > 1.2) throttle *= 0.55;
+      else if (angleError > 0.7) throttle *= 0.75;
+      if (blocked) throttle *= 0.45;
+      if (imminent) throttle *= 0.4;
+    } else {
+      if (angleError > 0.9) throttle *= 0.28;
+      else if (angleError > 0.5) throttle *= 0.5;
+      if (blocked) throttle *= 0.18;
+      if (imminent) throttle *= 0.35;
+      if (angleError > 2.2) throttle = 0.08;
+    }
 
     car.setThrottle(throttle);
   }
@@ -237,10 +249,11 @@ export class SteeringBehaviors {
   }
 
   /** Next A* waypoint (road path), if any — for heading commits that stay on asphalt. */
-  nextWaypoint(car: Car): Vector2 | null {
+  nextWaypoint(car: Car, lookAhead = 0): Vector2 | null {
     const cache = pathCaches.get(car.body);
     if (!cache || cache.waypoints.length === 0) return null;
-    return cache.waypoints[0] ?? null;
+    const i = Math.min(lookAhead, cache.waypoints.length - 1);
+    return cache.waypoints[i] ?? null;
   }
 
   followPath(
@@ -251,19 +264,21 @@ export class SteeringBehaviors {
     _maxSpeed: number,
     pathStyle: PathStyle,
     dt = 1 / 60,
-    opts?: { roadsOnly?: boolean },
+    opts?: { roadsOnly?: boolean; chase?: boolean },
   ): void {
     const roadsOnly = opts?.roadsOnly ?? false;
+    const chase = opts?.chase ?? false;
     let cache = pathCaches.get(car.body);
     const modeChanged = !!cache && cache.roadsOnly !== roadsOnly;
-    const goalMoved = !cache || cache.goal.distance(goal) > 28;
-    const stale = !cache || cache.age > 0.4 || cache.waypoints.length === 0;
+    const goalMoved = !cache || cache.goal.distance(goal) > (chase ? 36 : 28);
+    const stale =
+      !cache || cache.age > (chase ? 0.22 : 0.4) || cache.waypoints.length === 0;
 
     if (!cache || goalMoved || stale || modeChanged) {
       // Roads-only needs a wider search — arterials wind farther than lot cuts
       const waypoints = findPath(world, car.pos, goal, {
         roadsOnly,
-        maxNodes: roadsOnly ? 1400 : 360,
+        maxNodes: roadsOnly ? (chase ? 1800 : 1400) : 360,
       });
       cache = { waypoints, goal: goal.clone(), age: 0, roadsOnly };
       pathCaches.set(car.body, cache);
@@ -282,15 +297,15 @@ export class SteeringBehaviors {
         idx++;
       }
       if (idx > 0) cache.waypoints = path.slice(idx);
-      // Look ahead further when clear so we corner early around buildings
-      const look = Math.min(cache.waypoints.length - 1, 2);
+      // Chase looks farther down the arterial so cops commit to the route
+      const look = Math.min(cache.waypoints.length - 1, chase ? 4 : 2);
       target = cache.waypoints[look] ?? cache.waypoints[0] ?? goal;
       // If the look-ahead is LOS-blocked, use the nearer waypoint
       const los = raycastGrid(world, car.pos, target, 5, { roadsOnly });
       if (los && cache.waypoints[0]) {
         target = cache.waypoints[0];
       }
-      if (pathStyle === 'Chaotic' && !roadsOnly) {
+      if (pathStyle === 'Chaotic' && !roadsOnly && !chase) {
         const rng = createRng(`wp|${idx}|${Math.floor(goal.x)}`);
         target = target.add(new Vector2((rng() - 0.5) * 6, (rng() - 0.5) * 6));
       }
@@ -333,6 +348,7 @@ export class SteeringBehaviors {
       blocked,
       imminent,
       config,
+      { chase },
     );
     // Feelers skip lots; without this, cars drift into the curb and scrape.
     if (roadsOnly) this.keepCenteredOnRoad(car, world);

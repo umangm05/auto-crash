@@ -146,8 +146,11 @@ Append an entry each time a design/structural decision is made. Format:
 ### Cop roads-only chase
 - **Decision:** With `allowOffRoad: false`, cops path on asphalt only. Heading
   commits use the next A* waypoint — never crow-flies radio through lots.
+  Chase uses the live thief position, aggressive throttle, and chunk prefetch
+  under each cop. Off-screen units get edge-of-screen markers.
 - **Why:** Direct snaps at the thief pointed into curbs/buildings and left cops
-  wedged while “targeting” the thief. Road waypoints keep chase progress.
+  wedged; slow corner throttle + missing chunks made packs never close. Edge
+  markers give the thief directional awareness without omniscient minimap clutter.
 - **Date:** 2026-07-19.
 
 ### Chase AI feel
@@ -284,3 +287,6 @@ Append an entry each time a design/structural decision is made. Format:
   thief through lots, overriding A* road paths. Roads-only cops now snap to
   the next waypoint; A* reconstruct/search widened; empty-path uses road-axis
   probes; faster asphalt unwedge.
+- 2026-07-19: Aggressive cop chase — path to live thief, chase throttle,
+  prefetch chunks under off-screen cops, higher off-screen speed. Screen-edge
+  pulsing markers (`OffscreenMarkers.ts`) show off-screen cop directions.

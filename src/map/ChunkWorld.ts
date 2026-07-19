@@ -107,6 +107,21 @@ export class ChunkWorld {
     }
   }
 
+  /**
+   * Ensure chunks exist around a point without culling others.
+   * Used for off-screen cops so A* still sees the road network.
+   */
+  prefetchAround(worldX: number, worldY: number, radius = 1): void {
+    const cell = this.worldToCell(worldX, worldY);
+    const cc0 = this.chunkCoord(cell.col).chunk;
+    const cr0 = this.chunkCoord(cell.row).chunk;
+    for (let dr = -radius; dr <= radius; dr++) {
+      for (let dc = -radius; dc <= radius; dc++) {
+        this.ensureChunkData(cc0 + dc, cr0 + dr);
+      }
+    }
+  }
+
   getKind(col: number, row: number): CellKind {
     const cx = this.chunkCoord(col);
     const cy = this.chunkCoord(row);

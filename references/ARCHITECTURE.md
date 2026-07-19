@@ -49,9 +49,11 @@ Roles target the **radio last-known** contact (not omniscient live thief coords)
 
 Further cops cycle these roles. Spawn timer adds units + compounds speed (capped).
 
-Roads-only chase (`GAMEPLAY.allowOffRoad === false`): A* on asphalt; heading
-overrides snap to the next waypoint, not crow-flies radio (that pinned cops on
-curbs). Empty paths probe clear road axes. Stuck recovery repaths along road.
+Roads-only chase (`GAMEPLAY.allowOffRoad === false`): A* on asphalt toward the
+live thief; heading snaps to look-ahead waypoints (not crow-flies). Chunks are
+prefetched under each cop so distant A* still sees roads. Empty paths probe
+clear road axes. Stuck recovery repaths along road. Off-screen cops draw
+screen-edge markers (`src/ui/OffscreenMarkers.ts`).
 
 ## Cop radio
 

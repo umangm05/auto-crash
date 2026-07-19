@@ -19,6 +19,7 @@ import {
 } from '../physics/world';
 import { HUD } from '../ui/HUD';
 import { GameOverOverlay } from '../ui/GameOverOverlay';
+import { renderOffscreenCopMarkers } from '../ui/OffscreenMarkers';
 import { SetupOverlay } from '../ui/SetupOverlay';
 import { LLMClient } from '../llm/LLMClient';
 import { BIOME_COLORS, isRoadLike } from '../map/biomes';
@@ -184,6 +185,10 @@ export class Game {
     }
 
     this.world.updateAround(focus.x, focus.y, 2);
+    // Keep asphalt graph loaded under off-screen cops (no cull — thief owns GC)
+    for (const cop of this.cops.cops) {
+      this.world.prefetchAround(cop.car.pos.x, cop.car.pos.y, 1);
+    }
     this.camera.follow(focus, this.canvas.width, this.canvas.height);
 
     const view = this.camera.worldBounds(this.canvas.width, this.canvas.height);
@@ -282,6 +287,15 @@ export class Game {
     this.thief.render(ctx, this.timeSec);
     for (const cop of this.cops.cops) cop.render(ctx, this.timeSec);
     this.camera.end(ctx);
+
+    renderOffscreenCopMarkers(
+      ctx,
+      this.camera,
+      canvas.width,
+      canvas.height,
+      this.cops.cops,
+      this.timeSec,
+    );
   }
 
   private renderIdle(): void {
