@@ -77,7 +77,7 @@ export class SetupOverlay {
             <button type="button" data-manual="ai" class="manual-btn" style="${btnCss(true)}">AI</button>
             <button type="button" data-manual="manual" class="manual-btn" style="${btnCss(false)}">MANUAL</button>
           </div>
-          <p style="color:#8b949e;font-size:10px;margin:0 0 14px;">Manual: drive the thief with WASD or arrow keys. Thief mode only.</p>
+          <p style="color:#8b949e;font-size:10px;margin:0 0 14px;">Manual: WASD / arrows to drive, Space for nitro. Thief mode only.</p>
         </div>
 
         <label style="${LABEL}">Difficulty</label>
@@ -235,7 +235,7 @@ export class SetupOverlay {
     if (!thief) this.manual = false;
     this.refreshGroup('.manual-btn', 'data-manual', this.manual ? 'manual' : 'ai');
     this.taglineEl.textContent = this.manual
-      ? 'Manual thief — WASD / arrows. Cops stay AI.'
+      ? 'Manual thief — WASD / arrows, Space = nitro. Cops stay AI.'
       : 'Tuner / Strategist mode — AI drives both sides.';
   }
 

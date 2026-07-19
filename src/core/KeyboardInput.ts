@@ -52,6 +52,11 @@ export class KeyboardInput {
     return 0;
   }
 
+  /** Space — manual nitro. */
+  get nitroPressed(): boolean {
+    return this.pressed('Space');
+  }
+
   private pressed(...codes: string[]): boolean {
     return codes.some((c) => this.down.has(c));
   }
@@ -66,6 +71,7 @@ function isDriveKey(code: string): boolean {
     code === 'ArrowUp' ||
     code === 'ArrowDown' ||
     code === 'ArrowLeft' ||
-    code === 'ArrowRight'
+    code === 'ArrowRight' ||
+    code === 'Space'
   );
 }

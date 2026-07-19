@@ -22,14 +22,14 @@ export const CAR = {
   width: 22,
   height: 12,
   /** px/sec at full throttle, aggression 0.5, speedMult 1 */
-  maxSpeed: 58,
+  maxSpeed: 5,
   /** rad/sec turn at low speed; falls off as speed rises */
-  maxTurnRate: 2.4,
+  maxTurnRate: 4,
   /** How quickly velocity aligns to heading (higher = snappier, less drift) */
   baseGrip: 0.5,
   /** Extra slip on spills / low driftStability */
   spillGripScale: 0.45,
-  accel: 42,
+  accel: 30,
   brake: 70,
   coastDrag: 0.45,
   massApprox: 1,

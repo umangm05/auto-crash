@@ -27,16 +27,13 @@ export class HUD {
     manual = false,
   ): void {
     this.timerEl.textContent = `SURVIVAL ${formatTime(survivalSec)}`;
-    if (manual) {
-      this.infoEl.textContent = `COPS ${cops}  ·  SPEED ×${speedMult.toFixed(2)}  ·  WASD / ARROWS`;
-      return;
-    }
     const nitroLabel = nitroActive
       ? 'NITRO'
       : nitroFill >= 1
         ? 'NITRO READY'
         : `NITRO ${Math.round(nitroFill * 100)}%`;
-    this.infoEl.textContent = `COPS ${cops}  ·  SPEED ×${speedMult.toFixed(2)}  ·  ${nitroLabel}`;
+    const controls = manual ? '  ·  WASD / ARROWS  ·  SPACE NITRO' : '';
+    this.infoEl.textContent = `COPS ${cops}  ·  SPEED ×${speedMult.toFixed(2)}  ·  ${nitroLabel}${controls}`;
   }
 
   show(): void {

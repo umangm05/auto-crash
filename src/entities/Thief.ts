@@ -237,16 +237,20 @@ export class Thief {
     this.car.integrateControls(dt);
   }
 
-  /** Player drive: W/↑ throttle, S/↓ brake, A/← D/→ turn. No auto-nitro. */
+  /** Player drive: W/↑ throttle, S/↓ brake, A/← D/→ turn, Space nitro. */
   private updateManual(dt: number, input: KeyboardInput): void {
-    this.nitroState = 'ready';
-    this.nitroTimer = 0;
-    this.wasNitroActive = false;
-    this.car.speedMultiplier = GAMEPLAY.thiefSpeedMult;
-    this.car.accelScale = 1;
+    this.tickManualNitro(dt, input.nitroPressed);
+
+    const boost = this.isNitroActive ? GAMEPLAY.nitroSpeedMult : 1;
+    this.car.speedMultiplier = GAMEPLAY.thiefSpeedMult * boost;
+    this.car.accelScale = this.isNitroActive ? GAMEPLAY.nitroAccelScale : 1;
+    if (this.isNitroActive && !this.wasNitroActive) {
+      this.car.applySpeedKick(0.65);
+    }
+    this.wasNitroActive = this.isNitroActive;
 
     const throttle = input.throttleAxis;
-    if (throttle > 0) this.car.setThrottle(1);
+    if (this.isNitroActive || throttle > 0) this.car.setThrottle(1);
     else if (throttle < 0) this.car.setBrake(0.95);
     else this.car.setThrottle(0);
 
@@ -259,6 +263,32 @@ export class Thief {
     }
 
     this.car.integrateControls(dt);
+  }
+
+  /** Space fires nitro when ready; same duration / cooldown as AI boost. */
+  private tickManualNitro(dt: number, spaceDown: boolean): void {
+    if (this.nitroState === 'active') {
+      this.nitroTimer -= dt;
+      if (this.nitroTimer <= 0) {
+        this.nitroState = 'cooldown';
+        this.nitroTimer = GAMEPLAY.nitroCooldownSec;
+      }
+      return;
+    }
+
+    if (this.nitroState === 'cooldown') {
+      this.nitroTimer -= dt;
+      if (this.nitroTimer <= 0) {
+        this.nitroState = 'ready';
+        this.nitroTimer = 0;
+      }
+      return;
+    }
+
+    if (spaceDown) {
+      this.nitroState = 'active';
+      this.nitroTimer = GAMEPLAY.nitroDurationSec;
+    }
   }
 
   /**

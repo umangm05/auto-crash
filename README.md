@@ -34,7 +34,7 @@ npm run preview  # serve the production build
 ## Controls (setup overlay)
 
 1. Choose **Thief** or **Cop** mode (your sliders tune that side; the other uses difficulty presets).
-2. In **Thief** mode, pick **AI** or **Manual** control. Manual drives the thief with **WASD** or **arrow keys** (cops stay AI). Cop mode has no manual drive.
+2. In **Thief** mode, pick **AI** or **Manual** control. Manual: **WASD** / **arrows** to drive, **Space** for nitro (cops stay AI). Cop mode has no manual drive.
 3. Pick difficulty: Open Grid / Alleyway Maze / Dense Obstacles (density + AI presets).
 4. Pick **biome**: City (roads/junctions), Desert (open, no roads), Rural (winding tracks).
 5. Optionally set a **map seed** (same seed → same chunk layout).

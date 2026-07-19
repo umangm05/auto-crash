@@ -116,8 +116,8 @@ Append an entry each time a design/structural decision is made. Format:
 
 ### Tooling & control model
 - **Decision:** TypeScript + Vite; default AI-vs-AI simulation, with optional
-  **Manual** thief drive (WASD / arrows) from the setup overlay. Manual is
-  Thief-mode only; Cop mode stays tuner/AI.
+  **Manual** thief drive (WASD / arrows, Space = nitro) from the setup overlay.
+  Manual is Thief-mode only; Cop mode stays tuner/AI.
 - **Why:** Strategist tuning remains the primary loop; Manual is a playtest /
   fun escape hatch without inventing Cop driving. Keyboard lives in
   `src/core/KeyboardInput.ts` and only attaches during a manual match.
@@ -271,4 +271,5 @@ Append an entry each time a design/structural decision is made. Format:
   evade snaps also aimed into the roadside. Added `keepCenteredOnRoad`,
   blended evade turns, and escape scoring that prefers strip midline.
 - 2026-07-19: Manual thief control — setup AI/Manual toggle (Thief only);
-  WASD / arrows via `KeyboardInput`; skips flee AI + auto-nitro.
+  WASD / arrows via `KeyboardInput`; Space fires nitro (same cooldown);
+  skips flee AI + auto-nitro.
