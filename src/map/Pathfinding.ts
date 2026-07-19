@@ -1,0 +1,188 @@
+import { Vector2 } from '../core/Vector2';
+import type { ChunkWorld } from './ChunkWorld';
+import { isRoadLike } from './biomes';
+
+interface Node {
+  col: number;
+  row: number;
+  g: number;
+  f: number;
+  parent: Node | null;
+}
+
+function key(col: number, row: number): string {
+  return `${col},${row}`;
+}
+
+/** Bounded A* — routes around BLOCK cells; prefers roads when available. */
+export function findPath(
+  world: ChunkWorld,
+  start: Vector2,
+  goal: Vector2,
+  maxNodes = 360,
+): Vector2[] {
+  const s = world.worldToCell(start.x, start.y);
+  const g = world.worldToCell(goal.x, goal.y);
+
+  const startCell = nearestWalkable(world, s.col, s.row, 6);
+  let goalCell = nearestWalkable(world, g.col, g.row, 6);
+  if (!startCell || !goalCell) return [];
+
+  // Clamp goal to a nearby waypoint if too far
+  const md =
+    Math.abs(startCell.col - goalCell.col) + Math.abs(startCell.row - goalCell.row);
+  if (md > 28) {
+    const dirC = Math.sign(goalCell.col - startCell.col);
+    const dirR = Math.sign(goalCell.row - startCell.row);
+    goalCell =
+      nearestWalkable(world, startCell.col + dirC * 18, startCell.row + dirR * 18, 6) ??
+      goalCell;
+  }
+
+  if (startCell.col === goalCell.col && startCell.row === goalCell.row) {
+    return [world.cellCenter(goalCell.col, goalCell.row)];
+  }
+
+  const open: Node[] = [];
+  const openMap = new Map<string, Node>();
+  const closed = new Set<string>();
+
+  const startNode: Node = {
+    col: startCell.col,
+    row: startCell.row,
+    g: 0,
+    f: manhattan(startCell, goalCell),
+    parent: null,
+  };
+  open.push(startNode);
+  openMap.set(key(startNode.col, startNode.row), startNode);
+
+  let expanded = 0;
+  let bestReach: Node = startNode;
+
+  while (open.length && expanded < maxNodes) {
+    let bestIdx = 0;
+    for (let i = 1; i < open.length; i++) {
+      if (open[i]!.f < open[bestIdx]!.f) bestIdx = i;
+    }
+    const current = open.splice(bestIdx, 1)[0]!;
+    const ck = key(current.col, current.row);
+    openMap.delete(ck);
+    closed.add(ck);
+    expanded++;
+
+    if (manhattan(current, goalCell) < manhattan(bestReach, goalCell)) {
+      bestReach = current;
+    }
+
+    if (current.col === goalCell.col && current.row === goalCell.row) {
+      return reconstruct(world, current);
+    }
+
+    for (const n of world.neighbors4(current.col, current.row)) {
+      if (!world.isWalkable(n.col, n.row)) continue;
+      if (
+        Math.abs(n.col - startCell.col) > 26 ||
+        Math.abs(n.row - startCell.row) > 26
+      ) {
+        continue;
+      }
+      const nk = key(n.col, n.row);
+      if (closed.has(nk)) continue;
+      // Strongly prefer asphalt — open lots are walkable but slow / costly
+      const stepCost = isRoadLike(world.getKind(n.col, n.row)) ? 1 : 4.5;
+      const tg = current.g + stepCost;
+      const existing = openMap.get(nk);
+      if (!existing || tg < existing.g) {
+        const node: Node = {
+          col: n.col,
+          row: n.row,
+          g: tg,
+          f: tg + manhattan(n, goalCell),
+          parent: current,
+        };
+        if (existing) {
+          const idx = open.indexOf(existing);
+          if (idx >= 0) open.splice(idx, 1);
+        }
+        open.push(node);
+        openMap.set(nk, node);
+      }
+    }
+  }
+
+  return reconstruct(world, bestReach);
+}
+
+function manhattan(
+  a: { col: number; row: number },
+  b: { col: number; row: number },
+): number {
+  return Math.abs(a.col - b.col) + Math.abs(a.row - b.row);
+}
+
+function reconstruct(world: ChunkWorld, node: Node): Vector2[] {
+  const path: Vector2[] = [];
+  let cur: Node | null = node;
+  let guard = 0;
+  while (cur && guard++ < 64) {
+    path.push(world.cellCenter(cur.col, cur.row));
+    cur = cur.parent;
+  }
+  path.reverse();
+  return path;
+}
+
+export function nearestWalkable(
+  world: ChunkWorld,
+  col: number,
+  row: number,
+  maxR = 8,
+): { col: number; row: number } | null {
+  if (world.isWalkable(col, row)) return { col, row };
+  for (let r = 1; r <= maxR; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+        const c = col + dx;
+        const rr = row + dy;
+        if (world.isWalkable(c, rr)) return { col: c, row: rr };
+      }
+    }
+  }
+  return null;
+}
+
+export function nearestIntersectionAhead(
+  world: ChunkWorld,
+  from: Vector2,
+  velocity: Vector2,
+  maxLookCells = 10,
+): Vector2 | null {
+  const dir = velocity.length() < 1e-3 ? Vector2.fromAngle(0) : velocity.normalize();
+  let best: Vector2 | null = null;
+  let bestScore = Infinity;
+  const origin = world.worldToCell(from.x, from.y);
+
+  for (let r = 1; r <= maxLookCells; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+        const c = origin.col + dx;
+        const row = origin.row + dy;
+        if (world.streetDegree(c, row) < 3) continue;
+        const center = world.cellCenter(c, row);
+        const to = center.sub(from);
+        if (to.dot(dir) < 0) continue;
+        const dist = to.length();
+        const lateral = Math.abs(to.x * dir.y - to.y * dir.x);
+        const score = dist + lateral * 0.5;
+        if (score < bestScore) {
+          bestScore = score;
+          best = center;
+        }
+      }
+    }
+  }
+  return best;
+}
