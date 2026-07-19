@@ -59,12 +59,13 @@ On **every** prompt, before finishing your turn, run this check:
 
 ## Project Overview
 
-**Synchronized Chase** is a 100% client-side top-down AI chase game. The player is
+**Synchronized Chase** is a 100% client-side top-down chase game. The player is
 a Tuner/Strategist: they pick Thief or Cop mode, configure steering scalars
 (manually or via local WebLLM from natural language), then watch AI-driven cars
-in an **infinite streaming world** (city / desert / rural biomes). Matter.js
-handles rigid-body physics; Canvas 2D paints wireframe neon visuals with a
-camera that follows the thief.
+— or enable **Manual** (Thief only) and drive with WASD / arrows. Infinite
+streaming world (city / desert / rural biomes). Matter.js handles rigid-body
+physics; Canvas 2D paints wireframe neon visuals with a camera that follows the
+thief.
 
 Run: `npm install && npm run dev`
 
@@ -114,11 +115,13 @@ Append an entry each time a design/structural decision is made. Format:
 - **Date:** 2026-07-18.
 
 ### Tooling & control model
-- **Decision:** TypeScript + Vite; AI-vs-AI simulation (no keyboard driving).
-- **Why:** Type safety for vector/AI math and HMR during iteration; the slider +
-  WebLLM tuner fantasy matches the blueprint's strategist role better than
-  direct WASD control.
-- **Date:** 2026-07-18.
+- **Decision:** TypeScript + Vite; default AI-vs-AI simulation, with optional
+  **Manual** thief drive (WASD / arrows) from the setup overlay. Manual is
+  Thief-mode only; Cop mode stays tuner/AI.
+- **Why:** Strategist tuning remains the primary loop; Manual is a playtest /
+  fun escape hatch without inventing Cop driving. Keyboard lives in
+  `src/core/KeyboardInput.ts` and only attaches during a manual match.
+- **Date:** 2026-07-19 (manual added; was AI-only on 2026-07-18).
 - **Details:** [references/ARCHITECTURE.md](references/ARCHITECTURE.md).
 
 ### WebLLM integration
@@ -267,3 +270,5 @@ Append an entry each time a design/structural decision is made. Format:
   curb-brake), so thief had no lane-center pull vs asphalt walls; hard
   evade snaps also aimed into the roadside. Added `keepCenteredOnRoad`,
   blended evade turns, and escape scoring that prefers strip midline.
+- 2026-07-19: Manual thief control — setup AI/Manual toggle (Thief only);
+  WASD / arrows via `KeyboardInput`; skips flee AI + auto-nitro.

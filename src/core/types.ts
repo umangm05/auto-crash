@@ -18,6 +18,11 @@ export interface MatchSettings {
   seed: string;
   playerConfig: BehaviorConfig;
   opponentConfig: BehaviorConfig;
+  /**
+   * Player drives the thief with WASD / arrows.
+   * Only valid when `mode === 'thief'`; ignored for Cop mode.
+   */
+  manual: boolean;
 }
 
 export const DEFAULT_BEHAVIOR: BehaviorConfig = {

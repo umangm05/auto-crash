@@ -24,8 +24,13 @@ export class HUD {
     speedMult: number,
     nitroFill = 1,
     nitroActive = false,
+    manual = false,
   ): void {
     this.timerEl.textContent = `SURVIVAL ${formatTime(survivalSec)}`;
+    if (manual) {
+      this.infoEl.textContent = `COPS ${cops}  ·  SPEED ×${speedMult.toFixed(2)}  ·  WASD / ARROWS`;
+      return;
+    }
     const nitroLabel = nitroActive
       ? 'NITRO'
       : nitroFill >= 1

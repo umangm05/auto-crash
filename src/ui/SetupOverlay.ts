@@ -28,6 +28,7 @@ function btnCss(active: boolean, disabled = false): string {
 export class SetupOverlay {
   private root: HTMLDivElement;
   private mode: PlayMode = 'thief';
+  private manual = false;
   private difficulty: Difficulty = 'medium';
   private biome: Biome = 'city';
   private aggression = DEFAULT_BEHAVIOR.aggression;
@@ -38,6 +39,8 @@ export class SetupOverlay {
   private styleInput!: HTMLTextAreaElement;
   private statusEl!: HTMLDivElement;
   private llmProgressEl!: HTMLDivElement;
+  private manualRow!: HTMLDivElement;
+  private taglineEl!: HTMLParagraphElement;
 
   constructor(
     parent: HTMLElement,
@@ -60,12 +63,21 @@ export class SetupOverlay {
     return `
       <div style="width:min(520px,100%);border:1px solid #30363d;border-radius:10px;background:#161b22;padding:22px;box-shadow:0 0 40px rgba(57,255,20,0.08);">
         <h1 style="font-size:20px;letter-spacing:0.08em;color:#39ff14;margin-bottom:4px;">SYNCHRONIZED CHASE</h1>
-        <p style="color:#8b949e;font-size:12px;margin-bottom:18px;">Tuner / Strategist mode — AI drives both sides.</p>
+        <p id="tagline" style="color:#8b949e;font-size:12px;margin-bottom:18px;">Tuner / Strategist mode — AI drives both sides.</p>
 
         <label style="${LABEL}">Play as</label>
         <div style="display:flex;gap:8px;margin-bottom:14px;">
           <button type="button" data-mode="thief" class="mode-btn" style="${btnCss(true)}">THIEF</button>
           <button type="button" data-mode="cop" class="mode-btn" style="${btnCss(false)}">COP</button>
+        </div>
+
+        <div id="manual-row">
+          <label style="${LABEL}">Control</label>
+          <div style="display:flex;gap:8px;margin-bottom:6px;">
+            <button type="button" data-manual="ai" class="manual-btn" style="${btnCss(true)}">AI</button>
+            <button type="button" data-manual="manual" class="manual-btn" style="${btnCss(false)}">MANUAL</button>
+          </div>
+          <p style="color:#8b949e;font-size:10px;margin:0 0 14px;">Manual: drive the thief with WASD or arrow keys. Thief mode only.</p>
         </div>
 
         <label style="${LABEL}">Difficulty</label>
@@ -135,11 +147,23 @@ export class SetupOverlay {
     this.styleInput = this.root.querySelector('#style')!;
     this.statusEl = this.root.querySelector('#status')!;
     this.llmProgressEl = this.root.querySelector('#llm-progress')!;
+    this.manualRow = this.root.querySelector('#manual-row')!;
+    this.taglineEl = this.root.querySelector('#tagline')!;
 
     this.root.querySelectorAll<HTMLButtonElement>('.mode-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         this.mode = btn.dataset.mode as PlayMode;
         this.refreshGroup('.mode-btn', 'data-mode', this.mode);
+        if (this.mode === 'cop') this.manual = false;
+        this.refreshManualUi();
+      });
+    });
+
+    this.root.querySelectorAll<HTMLButtonElement>('.manual-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (this.mode !== 'thief') return;
+        this.manual = btn.dataset.manual === 'manual';
+        this.refreshManualUi();
       });
     });
 
@@ -197,10 +221,22 @@ export class SetupOverlay {
         seed: this.seedInput.value.trim() || `seed-${Date.now()}`,
         playerConfig,
         opponentConfig: DIFFICULTY_PRESETS[this.difficulty].opponent,
+        manual: this.mode === 'thief' && this.manual,
       });
     });
 
     this.root.querySelector('#llm-btn')!.addEventListener('click', () => void this.runLlm());
+    this.refreshManualUi();
+  }
+
+  private refreshManualUi(): void {
+    const thief = this.mode === 'thief';
+    this.manualRow.style.display = thief ? 'block' : 'none';
+    if (!thief) this.manual = false;
+    this.refreshGroup('.manual-btn', 'data-manual', this.manual ? 'manual' : 'ai');
+    this.taglineEl.textContent = this.manual
+      ? 'Manual thief — WASD / arrows. Cops stay AI.'
+      : 'Tuner / Strategist mode — AI drives both sides.';
   }
 
   private async runLlm(): Promise<void> {

@@ -1,4 +1,5 @@
 import { Vector2 } from '../core/Vector2';
+import type { KeyboardInput } from '../core/KeyboardInput';
 import type { Rng } from '../core/rng';
 import type { BehaviorConfig } from '../core/types';
 import { GAMEPLAY, topSpeed } from '../config/GameConfig';
@@ -14,6 +15,8 @@ type NitroState = 'ready' | 'active' | 'cooldown';
 
 export class Thief {
   readonly car: Car;
+  /** When true, WASD / arrows drive this car; AI flee is skipped. */
+  manual = false;
   private escapeTarget: Vector2 | null = null;
   private replanTimer = 0;
   /** How long we've been driving mostly along the same axis without a turn. */
@@ -75,10 +78,21 @@ export class Thief {
     );
   }
 
-  update(dt: number, world: ChunkWorld, cops: Cop[], rng: Rng): void {
+  update(
+    dt: number,
+    world: ChunkWorld,
+    cops: Cop[],
+    rng: Rng,
+    input?: KeyboardInput,
+  ): void {
+    this.refreshThreatSense(cops);
+    if (this.manual && input) {
+      this.updateManual(dt, input);
+      return;
+    }
+
     const config = this.car.config;
     const fleeR = steering.fleeRadius(config);
-    this.refreshThreatSense(cops);
     const roadsOnly = this.mustStayOnRoad;
 
     let danger = Vector2.zero();
@@ -218,6 +232,30 @@ export class Thief {
       const fleeing =
         dangerDir.length() < 0.5 || this.car.heading.dot(dangerDir) < 0.05;
       if (fleeing) this.car.setThrottle(1);
+    }
+
+    this.car.integrateControls(dt);
+  }
+
+  /** Player drive: W/↑ throttle, S/↓ brake, A/← D/→ turn. No auto-nitro. */
+  private updateManual(dt: number, input: KeyboardInput): void {
+    this.nitroState = 'ready';
+    this.nitroTimer = 0;
+    this.wasNitroActive = false;
+    this.car.speedMultiplier = GAMEPLAY.thiefSpeedMult;
+    this.car.accelScale = 1;
+
+    const throttle = input.throttleAxis;
+    if (throttle > 0) this.car.setThrottle(1);
+    else if (throttle < 0) this.car.setBrake(0.95);
+    else this.car.setThrottle(0);
+
+    const turn = input.turnAxis;
+    if (turn !== 0) {
+      // Keep desired heading ahead of the nose so integrateControls turns every frame
+      this.car.setDesiredHeading(this.car.angle + turn * 1.6);
+    } else {
+      this.car.setDesiredHeading(this.car.angle);
     }
 
     this.car.integrateControls(dt);

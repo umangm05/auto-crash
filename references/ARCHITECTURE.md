@@ -28,11 +28,13 @@
 
 ## Data flow
 
-1. Setup overlay → `MatchSettings` (mode, difficulty, biome, seed, configs).
-2. `Game.startMatch` builds Matter world + `ChunkWorld`, spawns thief + lead cop near origin.
-3. Each fixed tick: stream chunks → camera → CopManager / spills → AI
-   (`followPath` + avoid) → `integrateControls` → Matter step → zero spin →
-   grid wall resolve → catch-distance check.
+1. Setup overlay → `MatchSettings` (mode, difficulty, biome, seed, configs,
+   `manual` — Thief-only keyboard drive).
+2. `Game.startMatch` builds Matter world + `ChunkWorld`, spawns thief + lead
+   cop near origin; attaches `KeyboardInput` when `manual`.
+3. Each fixed tick: stream chunks → camera → CopManager / spills → thief
+   (AI flee **or** WASD/arrows) + cop AI → `integrateControls` → Matter step →
+   zero spin → grid wall resolve → catch-distance check.
 4. Distance `thief`↔`cop` < catch radius → game over + survival metrics.
 
 See also [WORLD.md](WORLD.md).

@@ -4,6 +4,7 @@ import type { MatchSettings } from './types';
 import { createRng, type Rng } from './rng';
 import { GameLoop } from './GameLoop';
 import { Camera } from './Camera';
+import { KeyboardInput } from './KeyboardInput';
 import { Thief } from '../entities/Thief';
 import type { Car } from '../entities/Car';
 import { ChunkWorld } from '../map/ChunkWorld';
@@ -32,6 +33,7 @@ export class Game {
   private readonly gameOver: GameOverOverlay;
   private readonly loop: GameLoop;
   private readonly camera = new Camera();
+  private readonly keys = new KeyboardInput();
 
   private physics: PhysicsWorld | null = null;
   private world: ChunkWorld | null = null;
@@ -44,6 +46,7 @@ export class Game {
   private over = false;
   private pendingGameOver = false;
   private timeSec = 0;
+  private manualThief = false;
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement) {
     this.canvas = canvas;
@@ -86,7 +89,9 @@ export class Game {
     const spawnPos = this.world.findSpawnNear(0, 0, 16);
     this.world.updateAround(spawnPos.x, spawnPos.y, 2);
 
+    this.manualThief = settings.mode === 'thief' && settings.manual;
     this.thief = new Thief(spawnPos.x, spawnPos.y, thiefConfig, this.rng);
+    this.thief.manual = this.manualThief;
     addBody(this.physics.world, this.thief.car.body);
 
     this.cops = new CopManager(copConfig, this.rng);
@@ -94,6 +99,10 @@ export class Game {
 
     this.spills = new RoadSpillManager(settings.seed);
     this.camera.snapTo(spawnPos, this.canvas.width, this.canvas.height);
+
+    this.keys.clear();
+    if (this.manualThief) this.keys.attach();
+    else this.keys.detach();
 
     this.setup.hide();
     this.gameOver.hide();
@@ -103,6 +112,8 @@ export class Game {
 
   private returnToSetup(): void {
     this.loop.stop();
+    this.keys.detach();
+    this.manualThief = false;
     this.teardownWorld();
     this.playing = false;
     this.over = false;
@@ -193,7 +204,13 @@ export class Game {
     // Visual → radio broadcast before AI so the whole pack shares one contact
     this.cops.updateRadio(dt, this.world, this.thief);
 
-    this.thief.update(dt, this.world, this.cops.cops, this.rng);
+    this.thief.update(
+      dt,
+      this.world,
+      this.cops.cops,
+      this.rng,
+      this.manualThief ? this.keys : undefined,
+    );
     for (const cop of this.cops.cops) {
       cop.update(
         dt,
@@ -240,6 +257,7 @@ export class Game {
       this.cops.getSpeedMultiplier(),
       this.thief.nitroFill,
       this.thief.isNitroActive,
+      this.manualThief,
     );
   }
 
