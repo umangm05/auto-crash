@@ -65,7 +65,8 @@ export const GAMEPLAY = {
   /** Nitro: active duration, refill after boost ends, speed while boosting */
   nitroDurationSec: 1,
   nitroCooldownSec: 5,
-  nitroSpeedMult: 0.4,
+  /** Multiplier on thief top speed while nitro burns (must be >1). */
+  nitroSpeedMult: 1.1,
   /** Extra accel while nitro is burning (base accel is too weak to hit 1.5× in 1s). */
   nitroAccelScale: 2.4,
   /** Cop proximity glow / sense baseline */
@@ -95,6 +96,11 @@ export const GAMEPLAY = {
   /** Also require almost no position change while "stuck". */
   copStuckMovePx: 18,
   catchRadius: 20,
+  /**
+   * AI thief must change route at least this often (seconds of nearly-straight
+   * driving). Stops monotonous single-axis chases.
+   */
+  thiefMaxStraightSec: 10,
 } as const;
 
 export const DIFFICULTY_PRESETS: Record<

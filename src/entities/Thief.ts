@@ -19,9 +19,10 @@ export class Thief {
   manual = false;
   private escapeTarget: Vector2 | null = null;
   private replanTimer = 0;
-  /** How long we've been driving mostly along the same axis without a turn. */
+  /** How long we've been on the same cardinal axis (E-W vs N-S). */
   private straightSec = 0;
-  private lastHeading = new Vector2(1, 0);
+  /** 0 = east/west dominant, 1 = north/south dominant. */
+  private driveAxis: 0 | 1 = 0;
   private nitroState: NitroState = 'ready';
   private nitroTimer = 0;
   private wasNitroActive = false;
@@ -146,27 +147,29 @@ export class Thief {
     this.car.speedMultiplier = GAMEPLAY.thiefSpeedMult * boost;
     this.car.accelScale = this.isNitroActive ? GAMEPLAY.nitroAccelScale : 1;
     if (this.isNitroActive && !this.wasNitroActive) {
-      this.car.applySpeedKick(0.65);
+      this.car.applySpeedKick(0.75);
     }
     this.wasNitroActive = this.isNitroActive;
     const maxSpeed = topSpeed(config.aggression, this.car.speedMultiplier);
 
-    const turnDot = heading.dot(this.lastHeading);
-    if (turnDot > 0.92) this.straightSec += dt;
+    // Axis timer: only resets when E-W ↔ N-S actually flips (not on replan)
+    const axis: 0 | 1 = Math.abs(heading.x) >= Math.abs(heading.y) ? 0 : 1;
+    if (axis === this.driveAxis) this.straightSec += dt;
     else {
+      this.driveAxis = axis;
       this.straightSec = 0;
-      this.lastHeading = heading;
     }
 
     this.replanTimer -= dt;
-    // Don't force random curb-dives when idle — only when threatened or truly stuck
+    // Hard cap: never cruise one axis forever (chase gets monotonous)
+    const overdueRoute = this.straightSec >= GAMEPLAY.thiefMaxStraightSec;
     const forceTurn =
       blockedAhead ||
+      overdueRoute ||
       (threats > 0 &&
         (headingIntoDanger ||
           aheadThreat > behindThreat * 0.45 ||
-          nearestDist < fleeR * 0.65)) ||
-      (threats === 0 && this.straightSec > 6);
+          nearestDist < fleeR * 0.65));
 
     const needReplan =
       this.replanTimer <= 0 ||
@@ -185,10 +188,18 @@ export class Thief {
         blockedAhead,
         roadsOnly,
         rng,
+        overdueRoute,
       );
+      if (overdueRoute) {
+        // Guarantee a perpendicular goal — scoring alone sometimes re-picked forward
+        this.escapeTarget = this.forceAxisChange(world, roadsOnly, rng);
+      }
       this.replanTimer =
-        threats > 0 ? 0.35 + rng() * 0.25 : forceTurn ? 0.8 + rng() * 0.4 : 1.6 + rng();
-      if (forceTurn) this.straightSec = 0;
+        threats > 0
+          ? 0.35 + rng() * 0.25
+          : forceTurn
+            ? 0.9 + rng() * 0.5
+            : 1.6 + rng();
       steering.invalidatePath(this.car);
     }
 
@@ -214,9 +225,9 @@ export class Thief {
       { roadsOnly },
     );
 
-    // Flee = turn first. Always commit escape heading when threatened.
-    if (threats > 0 && this.escapeTarget) {
-      this.commitEvadeTurn(this.escapeTarget, world, roadsOnly);
+    // Flee / overdue route = commit heading. Never brake while nitro is burning.
+    if ((threats > 0 || overdueRoute) && this.escapeTarget) {
+      this.commitEvadeTurn(this.escapeTarget, world, roadsOnly, overdueRoute);
     } else if (!this.isNitroActive) {
       steering.emergencyBrakeForCars(
         this.car,
@@ -225,16 +236,50 @@ export class Thief {
     }
 
     // Keep off the roadside — feelers ignore lots, so recenter on asphalt.
-    if (roadsOnly) steering.keepCenteredOnRoad(this.car, world);
-
-    // Nitro full-throttle only once we're pointed away from danger
-    if (this.isNitroActive) {
-      const fleeing =
-        dangerDir.length() < 0.5 || this.car.heading.dot(dangerDir) < 0.05;
-      if (fleeing) this.car.setThrottle(1);
+    if (roadsOnly && !this.isNitroActive) {
+      steering.keepCenteredOnRoad(this.car, world);
     }
 
+    // Nitro always full throttle — evade/path must not leave us braking
+    if (this.isNitroActive) this.car.setThrottle(1);
+
     this.car.integrateControls(dt);
+  }
+
+  /** Pick a clear perpendicular road goal so the axis timer can flip. */
+  private forceAxisChange(
+    world: ChunkWorld,
+    roadsOnly: boolean,
+    rng: Rng,
+  ): Vector2 {
+    const heading = this.car.heading;
+    const left = new Vector2(-heading.y, heading.x);
+    const right = new Vector2(heading.y, -heading.x);
+    const side = rng() < 0.5 ? left : right;
+    const alts = [
+      side,
+      side === left ? right : left,
+      side.add(heading.scale(0.35)).normalize(),
+      (side === left ? right : left).add(heading.scale(0.35)).normalize(),
+    ];
+
+    let best = side;
+    let bestClear = -1;
+    for (const d of alts) {
+      if (d.length() < 1e-4) continue;
+      const n = d.normalize();
+      const tip = this.car.pos.add(n.scale(100));
+      const hit = raycastGrid(world, this.car.pos, tip, 5, { roadsOnly });
+      const clear = hit ? this.car.pos.distance(hit) : 100;
+      if (clear > bestClear) {
+        bestClear = clear;
+        best = n;
+      }
+    }
+
+    const goal = world.cellInDirection(this.car.pos, best, 6);
+    if (roadsOnly) return nearestRoadPoint(world, goal, 16) ?? goal;
+    return goal;
   }
 
   /** Player drive: W/↑ throttle, S/↓ brake, A/← D/→ turn, Space nitro. */
@@ -299,12 +344,13 @@ export class Thief {
     target: Vector2,
     world: ChunkWorld,
     roadsOnly: boolean,
+    hardTurn = false,
   ): void {
     const to = target.sub(this.car.pos);
     if (to.length() < 4) return;
     const n = to.normalize();
 
-    if (roadsOnly) {
+    if (roadsOnly && !hardTurn) {
       const tip = this.car.pos.add(n.scale(48));
       const hit = raycastGrid(world, this.car.pos, tip, 4, { roadsOnly: true });
       if (hit && this.car.pos.distance(hit) < 30) {
@@ -314,8 +360,13 @@ export class Thief {
       }
     }
 
+    const blend = hardTurn ? 0.75 : 0.42;
     const err = wrapAngle(to.heading() - this.car.angle);
-    this.car.setDesiredHeading(wrapAngle(this.car.angle + err * 0.42));
+    this.car.setDesiredHeading(wrapAngle(this.car.angle + err * blend));
+    if (this.isNitroActive) {
+      this.car.setThrottle(1);
+      return;
+    }
     const alongEscape = n.dot(this.car.heading);
     this.car.setThrottle(alongEscape < 0.25 ? 0.55 : 0.9);
   }
@@ -367,9 +418,13 @@ export class Thief {
     blockedAhead: boolean,
     roadsOnly: boolean,
     rng: Rng,
+    /** True when we hit the max-straight timer — must leave this axis. */
+    mustChangeRoute = false,
   ): Vector2 {
     const heading = this.car.heading;
     const cell = world.worldToCell(this.car.pos.x, this.car.pos.y);
+    const left = new Vector2(-heading.y, heading.x);
+    const right = new Vector2(heading.y, -heading.x);
 
     const snap = (p: Vector2): Vector2 => {
       if (!roadsOnly) return p;
@@ -388,14 +443,14 @@ export class Thief {
       heading.rotate(-0.4),
     ];
 
-    if (threats > 0 || blockedAhead || forceTurn) {
-      const left = new Vector2(-heading.y, heading.x);
-      const right = new Vector2(heading.y, -heading.x);
+    if (threats > 0 || blockedAhead || forceTurn || mustChangeRoute) {
       dirs.push(
         left,
         right,
-        left.add(heading.scale(0.4)).normalize(),
-        right.add(heading.scale(0.4)).normalize(),
+        left.add(heading.scale(0.35)).normalize(),
+        right.add(heading.scale(0.35)).normalize(),
+        left.add(heading.scale(0.7)).normalize(),
+        right.add(heading.scale(0.7)).normalize(),
         heading.scale(-1),
       );
       if (dangerDir.length() > 0.5) {
@@ -407,6 +462,16 @@ export class Thief {
           away.add(heading).normalize(),
         );
       }
+    }
+
+    // Timed route change: bias hard left or right so we don't re-pick forward
+    if (mustChangeRoute) {
+      const side = rng() < 0.5 ? left : right;
+      dirs.unshift(
+        side,
+        side.add(heading.scale(0.25)).normalize(),
+        side.add(heading.scale(-0.15)).normalize(),
+      );
     }
 
     for (const d of dirs) {
@@ -464,15 +529,30 @@ export class Thief {
         if (sideMin < 14) score -= 55;
       }
 
-      // Strongly prefer continuing along the current road when idle
-      if (threats === 0) {
-        score += n.dot(heading) * 55;
+      const along = n.dot(heading);
+
+      // Strongly prefer continuing along the current road when idle —
+      // but not when we're forcing a route change for variety.
+      if (threats === 0 && !mustChangeRoute && !forceTurn) {
+        score += along * 55;
+      }
+
+      if (mustChangeRoute) {
+        // Leave this axis: punish forward / reverse-ish keep, reward side cuts
+        if (along > 0.5) score -= 120;
+        else if (along > 0.2) score -= 50;
+        score += (1 - Math.abs(along)) * 85;
+        // Prefer the randomly chosen side a bit more
+        score += Math.abs(n.dot(left)) * 20;
+      } else if (forceTurn && threats === 0) {
+        if (along > 0.65) score -= 40;
+        score += (1 - Math.abs(along)) * 35;
       }
 
       if (threats > 0 && dangerDir.length() > 0.5) {
         // Flee away from cops — not into them
         score -= n.dot(dangerDir) * 120;
-        score += n.dot(heading) * 10; // slight keep-rolling bias
+        if (!mustChangeRoute) score += along * 10; // slight keep-rolling bias
       }
 
       // Bonus if the step lands on a road cell

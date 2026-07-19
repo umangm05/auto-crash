@@ -18,8 +18,9 @@ The playfield is an **infinite 2D top-down world**, not a single screen-sized ma
 | **Rural** | Implemented, UI disabled | Dirt tracks + fields (re-enable later) |
 
 City paint lives in `src/map/cityRender.ts`. Layout targets an irregular urban
-grid (variable block sizes, major + local streets, T-cuts, stepped diagonal
-avenue, parks) via superblock street planning — not a uniform checkerboard.
+grid via superblock street planning. Per-street rarity (`rollStreetProfile`):
+**40% 2-lane**, **20% 4-lane**, **20% 1-lane**, **20% bridge** (2-lane elevated
+`BRIDGE` deck). River crossings still add short bridge spans on V streets.
 
 **Brown strip bug:** that was the `BRIDGE` deck. Bridges are short spans only on
 vertical street crossings; deck is black asphalt with rails over blue water.

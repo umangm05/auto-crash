@@ -167,14 +167,16 @@ Append an entry each time a design/structural decision is made. Format:
   the flee band, then **5s** refill. Engagement applies a forward kick +
   `nitroAccelScale` and full throttle (emergency car-brake is skipped while
   boosting so the speedup is visible). Thief proximity glow/flee radius is
-  **2×** cop sense.
+  **2×** cop sense. AI thief must change route at least every
+  `thiefMaxStraightSec` (10s) of near-straight driving — forced side cut so
+  single-axis cruises don’t make the chase monotonous (Manual ignores this).
   New cops spawn on a timer until the cap. Cops **stay on roads** (roads-only
   A* + near-zero lot speed) unless the thief is inside their sense radius,
   then they may cut off-road. Off-screen catch-up is still 2× only on asphalt
   (no teleport). Wedged cops only face the radio fix.
 - **Why:** Earlier velocity-blend + high angularVelocity made cars spin and
   clip through the map; real chase needs walls, corners, and readable speed.
-- **Date:** 2026-07-18.
+- **Date:** 2026-07-18 (route-variety cap 2026-07-19).
 
 ### Cop radio net
 - **Decision:** Cops do not omnisciently track the live thief. Match start seeds
@@ -290,3 +292,10 @@ Append an entry each time a design/structural decision is made. Format:
 - 2026-07-19: Aggressive cop chase — path to live thief, chase throttle,
   prefetch chunks under off-screen cops, higher off-screen speed. Screen-edge
   pulsing markers (`OffscreenMarkers.ts`) show off-screen cop directions.
+- 2026-07-19: Thief AI max straight `thiefMaxStraightSec` (10s) — forced
+  side-route change so single-axis cruises don't make the chase monotonous.
+- 2026-07-19: Nitro was `0.8×` (slower) + evade brakes fought the boost —
+  restored `1.5×` + full throttle while burning. HUD `COP ×` is pack
+  escalation (+3%/spawn), not world speed. Axis timer only resets on E-W↔N-S
+  flip + hard perpendicular goal. Road rarity 40/20/20/20
+  (2-lane / 4-lane / 1-lane / bridge); city seed v9.

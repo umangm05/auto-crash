@@ -200,8 +200,8 @@ function paintLaneMarkings(
   }
   ctx.stroke();
 
-  // Dashed lane dividers — one line per shared edge so 2- and 3-lane strips
-  // get markings between every pair of lanes (not only the outer boundary).
+  // Dashed lane dividers — one line per shared edge so multi-lane strips
+  // (2–4 lanes) get markings between every pair of lanes.
   ctx.strokeStyle = 'rgba(232,232,232,0.9)';
   ctx.lineWidth = 1.5;
   const phase = ((col + row) * 7) % 24;

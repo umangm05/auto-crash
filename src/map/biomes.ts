@@ -132,7 +132,32 @@ function idx(size: number, c: number, r: number): number {
   return r * size + c;
 }
 
-function setRoad(cells: CellKind[], size: number, c: number, r: number): void {
+export type CityStreet = {
+  local: number;
+  width: number;
+  major: boolean;
+  /** Elevated deck asphalt (BRIDGE cells) for the whole arterial. */
+  bridge: boolean;
+};
+
+/**
+ * Road rarity: 40% 2-lane, 20% 4-lane, 20% 1-lane, 20% bridge (2-lane deck).
+ */
+function rollStreetProfile(rng: Rng): { width: number; bridge: boolean } {
+  const r = rng();
+  if (r < 0.4) return { width: 2, bridge: false };
+  if (r < 0.6) return { width: 4, bridge: false };
+  if (r < 0.8) return { width: 1, bridge: false };
+  return { width: 2, bridge: true };
+}
+
+function setRoad(
+  cells: CellKind[],
+  size: number,
+  c: number,
+  r: number,
+  bridge = false,
+): void {
   if (c < 0 || r < 0 || c >= size || r >= size) return;
   const i = idx(size, c, r);
   const cur = cells[i]!;
@@ -142,10 +167,10 @@ function setRoad(cells: CellKind[], size: number, c: number, r: number): void {
   }
   if (cur === CellKind.BRIDGE || cur === CellKind.JUNCTION) return;
   if (cur === CellKind.PARK) {
-    cells[i] = CellKind.ROAD;
+    cells[i] = bridge ? CellKind.BRIDGE : CellKind.ROAD;
     return;
   }
-  cells[i] = CellKind.ROAD;
+  cells[i] = bridge ? CellKind.BRIDGE : CellKind.ROAD;
 }
 
 function paintHSpan(
@@ -155,11 +180,12 @@ function paintHSpan(
   width: number,
   c0: number,
   c1: number,
+  bridge = false,
 ): void {
   for (let w = 0; w < width; w++) {
     const row = r + w;
     if (row < 0 || row >= size) continue;
-    for (let c = c0; c <= c1; c++) setRoad(cells, size, c, row);
+    for (let c = c0; c <= c1; c++) setRoad(cells, size, c, row, bridge);
   }
 }
 
@@ -170,11 +196,12 @@ function paintVSpan(
   width: number,
   r0: number,
   r1: number,
+  bridge = false,
 ): void {
   for (let w = 0; w < width; w++) {
     const col = c + w;
     if (col < 0 || col >= size) continue;
-    for (let r = r0; r <= r1; r++) setRoad(cells, size, col, r);
+    for (let r = r0; r <= r1; r++) setRoad(cells, size, col, r, bridge);
   }
 }
 
@@ -194,47 +221,59 @@ function superLocal(g: number): number {
 
 /**
  * Sparse irregular streets — edges keep chunks connected; interiors are few.
+ * Width / bridge type follows ROAD_RARITY via rollStreetProfile.
  */
-function vStreetsInSuper(sx: number): Array<{ local: number; width: number; major: boolean }> {
-  const rng = createRng(`vstreet|${sx}`);
-  const out: Array<{ local: number; width: number; major: boolean }> = [];
+function vStreetsInSuper(sx: number): CityStreet[] {
+  const rng = createRng(`vstreet|v9|${sx}`);
+  const out: CityStreet[] = [];
   const major = sx % 4 === 0;
-  // Majors are 3 lanes; some interiors are 2
-  out.push({ local: 0, width: major ? 3 : 1, major });
+  const edge = rollStreetProfile(rng);
+  out.push({ local: 0, width: edge.width, major, bridge: edge.bridge });
 
   // 1–2 interior streets only, wide gaps between blocks
   const interior = 1 + (rng() < 0.45 ? 1 : 0);
   let cursor = 8 + randInt(rng, 0, 6);
-  for (let i = 0; i < interior && cursor < SUPER - 6; i++) {
-    const w = rng() < 0.2 ? 3 : rng() < 0.45 ? 2 : 1;
-    out.push({ local: cursor, width: w, major: false });
-    cursor += 10 + randInt(rng, 0, 8);
+  for (let i = 0; i < interior && cursor < SUPER - 8; i++) {
+    const p = rollStreetProfile(rng);
+    out.push({ local: cursor, width: p.width, major: false, bridge: p.bridge });
+    cursor += 10 + randInt(rng, 0, 8) + (p.width > 2 ? 2 : 0);
   }
-  out.push({ local: SUPER - 1, width: 1, major: false });
+  const end = rollStreetProfile(rng);
+  out.push({
+    local: Math.max(0, SUPER - end.width),
+    width: end.width,
+    major: false,
+    bridge: end.bridge,
+  });
   return dedupeStreets(out);
 }
 
-function hStreetsInSuper(sy: number): Array<{ local: number; width: number; major: boolean }> {
-  const rng = createRng(`hstreet|${sy}`);
-  const out: Array<{ local: number; width: number; major: boolean }> = [];
+function hStreetsInSuper(sy: number): CityStreet[] {
+  const rng = createRng(`hstreet|v9|${sy}`);
+  const out: CityStreet[] = [];
   const major = sy % 4 === 0;
-  out.push({ local: 0, width: major ? 3 : 1, major });
+  const edge = rollStreetProfile(rng);
+  out.push({ local: 0, width: edge.width, major, bridge: edge.bridge });
 
   const interior = 1 + (rng() < 0.4 ? 1 : 0);
   let cursor = 8 + randInt(rng, 0, 6);
-  for (let i = 0; i < interior && cursor < SUPER - 6; i++) {
-    const w = rng() < 0.2 ? 3 : rng() < 0.4 ? 2 : 1;
-    out.push({ local: cursor, width: w, major: false });
-    cursor += 10 + randInt(rng, 0, 9);
+  for (let i = 0; i < interior && cursor < SUPER - 8; i++) {
+    const p = rollStreetProfile(rng);
+    out.push({ local: cursor, width: p.width, major: false, bridge: p.bridge });
+    cursor += 10 + randInt(rng, 0, 9) + (p.width > 2 ? 2 : 0);
   }
-  out.push({ local: SUPER - 1, width: 1, major: false });
+  const end = rollStreetProfile(rng);
+  out.push({
+    local: Math.max(0, SUPER - end.width),
+    width: end.width,
+    major: false,
+    bridge: end.bridge,
+  });
   return dedupeStreets(out);
 }
 
-function dedupeStreets(
-  streets: Array<{ local: number; width: number; major: boolean }>,
-): Array<{ local: number; width: number; major: boolean }> {
-  const map = new Map<number, { local: number; width: number; major: boolean }>();
+function dedupeStreets(streets: CityStreet[]): CityStreet[] {
+  const map = new Map<number, CityStreet>();
   for (const s of streets) {
     const prev = map.get(s.local);
     if (!prev || s.width > prev.width || s.major) map.set(s.local, s);
@@ -242,9 +281,7 @@ function dedupeStreets(
   return [...map.values()].sort((a, b) => a.local - b.local);
 }
 
-export function isCityVStreet(
-  globalC: number,
-): { local: number; width: number; major: boolean } | null {
+export function isCityVStreet(globalC: number): CityStreet | null {
   const sx = superId(globalC);
   const local = superLocal(globalC);
   for (const s of vStreetsInSuper(sx)) {
@@ -253,9 +290,7 @@ export function isCityVStreet(
   return null;
 }
 
-export function isCityHStreet(
-  globalR: number,
-): { local: number; width: number; major: boolean } | null {
+export function isCityHStreet(globalR: number): CityStreet | null {
   const sy = superId(globalR);
   const local = superLocal(globalR);
   for (const s of hStreetsInSuper(sy)) {
@@ -293,13 +328,15 @@ function genCity(
   // Full-span streets — always continuous across chunk borders.
   // Skip E-W arterials that fall inside the river band (V streets cross on bridges).
   for (let r = 0; r < size; r++) {
-    if (!isCityHStreet(gR0 + r)) continue;
+    const hs = isCityHStreet(gR0 + r);
+    if (!hs) continue;
     if (inRiverBand(gR0 + r)) continue;
-    paintHSpan(cells, size, r, 1, 0, size - 1);
+    paintHSpan(cells, size, r, 1, 0, size - 1, hs.bridge);
   }
   for (let c = 0; c < size; c++) {
-    if (!isCityVStreet(gC0 + c)) continue;
-    paintVSpan(cells, size, c, 1, 0, size - 1);
+    const vs = isCityVStreet(gC0 + c);
+    if (!vs) continue;
+    paintVSpan(cells, size, c, 1, 0, size - 1, vs.bridge);
   }
 
   paintParks(cells, size, rng, gC0, gR0);

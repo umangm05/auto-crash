@@ -33,7 +33,8 @@ export class HUD {
         ? 'NITRO READY'
         : `NITRO ${Math.round(nitroFill * 100)}%`;
     const controls = manual ? '  ·  WASD / ARROWS  ·  SPACE NITRO' : '';
-    this.infoEl.textContent = `COPS ${cops}  ·  SPEED ×${speedMult.toFixed(2)}  ·  ${nitroLabel}${controls}`;
+    // speedMult = cop pack escalation (compounds each spawn cycle), not world time
+    this.infoEl.textContent = `COPS ${cops}  ·  COP ×${speedMult.toFixed(2)}  ·  ${nitroLabel}${controls}`;
   }
 
   show(): void {
