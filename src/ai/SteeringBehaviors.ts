@@ -236,6 +236,13 @@ export class SteeringBehaviors {
     pathCaches.delete(car.body);
   }
 
+  /** Next A* waypoint (road path), if any — for heading commits that stay on asphalt. */
+  nextWaypoint(car: Car): Vector2 | null {
+    const cache = pathCaches.get(car.body);
+    if (!cache || cache.waypoints.length === 0) return null;
+    return cache.waypoints[0] ?? null;
+  }
+
   followPath(
     car: Car,
     world: ChunkWorld,
@@ -256,7 +263,7 @@ export class SteeringBehaviors {
       // Roads-only needs a wider search — arterials wind farther than lot cuts
       const waypoints = findPath(world, car.pos, goal, {
         roadsOnly,
-        maxNodes: roadsOnly ? 720 : 360,
+        maxNodes: roadsOnly ? 1400 : 360,
       });
       cache = { waypoints, goal: goal.clone(), age: 0, roadsOnly };
       pathCaches.set(car.body, cache);
@@ -298,8 +305,13 @@ export class SteeringBehaviors {
         const road = nearestRoadPoint(world, car.pos, 16);
         if (road) aim = road.sub(car.pos);
       } else if (path.length === 0) {
-        const roadGoal = nearestRoadPoint(world, goal, 14) ?? goal;
-        aim = roadGoal.sub(car.pos);
+        // Crow-flies roadGoal often crosses lots → curb pin. Pick a clear road axis.
+        const open = this.openRoadToward(car, world, goal);
+        if (open) aim = open;
+        else {
+          const roadGoal = nearestRoadPoint(world, goal, 14) ?? goal;
+          aim = roadGoal.sub(car.pos);
+        }
       }
     } else if (path.length === 0) {
       const open = this.openLaneToward(car, world, goal);
@@ -328,16 +340,40 @@ export class SteeringBehaviors {
 
   /** Pick a free feeler direction closest to the goal bearing. */
   private openLaneToward(car: Car, world: ChunkWorld, goal: Vector2): Vector2 | null {
+    return this.probeOpenToward(car, world, goal, false);
+  }
+
+  /** Same as openLaneToward but lots count as walls (roads-only chase). */
+  private openRoadToward(car: Car, world: ChunkWorld, goal: Vector2): Vector2 | null {
+    return this.probeOpenToward(car, world, goal, true);
+  }
+
+  private probeOpenToward(
+    car: Car,
+    world: ChunkWorld,
+    goal: Vector2,
+    roadsOnly: boolean,
+  ): Vector2 | null {
     const toGoal = goal.sub(car.pos);
     if (toGoal.length() < 1e-3) return null;
     const base = toGoal.heading();
-    const probes = [0, 0.55, -0.55, 1.1, -1.1, Math.PI * 0.5, -Math.PI * 0.5, Math.PI];
+    const probes = [
+      0,
+      0.55,
+      -0.55,
+      1.1,
+      -1.1,
+      Math.PI * 0.5,
+      -Math.PI * 0.5,
+      Math.PI,
+    ];
     let best: Vector2 | null = null;
     let bestScore = -Infinity;
+    const rayOpts = { roadsOnly };
     for (const a of probes) {
       const dir = Vector2.fromAngle(base + a);
       const tip = car.pos.add(dir.scale(STEERING.feelerLength));
-      const hit = raycastGrid(world, car.pos, tip, 4);
+      const hit = raycastGrid(world, car.pos, tip, 4, rayOpts);
       const clear = hit ? car.pos.distance(hit) : STEERING.feelerLength;
       if (clear < 22) continue;
       const score = clear + Math.cos(a) * 28;

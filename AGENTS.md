@@ -143,6 +143,13 @@ Append an entry each time a design/structural decision is made. Format:
 - **Date:** 2026-07-18.
 - **Details:** [references/WORLD.md](references/WORLD.md).
 
+### Cop roads-only chase
+- **Decision:** With `allowOffRoad: false`, cops path on asphalt only. Heading
+  commits use the next A* waypoint — never crow-flies radio through lots.
+- **Why:** Direct snaps at the thief pointed into curbs/buildings and left cops
+  wedged while “targeting” the thief. Road waypoints keep chase progress.
+- **Date:** 2026-07-19.
+
 ### Chase AI feel
 - **Decision:** Arcade car model — throttle + desired heading with **limited turn
   rate** (no free spin), lateral grip/drift from `driftStability`, hard grid
@@ -273,3 +280,7 @@ Append an entry each time a design/structural decision is made. Format:
 - 2026-07-19: Manual thief control — setup AI/Manual toggle (Thief only);
   WASD / arrows via `KeyboardInput`; Space fires nitro (same cooldown);
   skips flee AI + auto-nitro.
+- 2026-07-19: Cops stuck on curbs — `snapTowardRadio` aimed crow-flies at the
+  thief through lots, overriding A* road paths. Roads-only cops now snap to
+  the next waypoint; A* reconstruct/search widened; empty-path uses road-axis
+  probes; faster asphalt unwedge.

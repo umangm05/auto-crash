@@ -49,16 +49,19 @@ export function findPath(
     : nearestWalkable(world, g.col, g.row, 6);
   if (!startCell || !goalCell) return [];
 
-  // Clamp goal to a nearby waypoint if too far
+  // Clamp goal to a nearby waypoint if too far (roads wind farther than crow-flies)
   const md =
     Math.abs(startCell.col - goalCell.col) + Math.abs(startCell.row - goalCell.row);
-  if (md > 28) {
+  const far = roadsOnly ? 40 : 28;
+  if (md > far) {
+    const hop = roadsOnly ? 22 : 18;
     const dirC = Math.sign(goalCell.col - startCell.col);
     const dirR = Math.sign(goalCell.row - startCell.row);
     goalCell =
       (roadsOnly
-        ? nearestRoad(world, startCell.col + dirC * 18, startCell.row + dirR * 18, 10)
-        : nearestWalkable(world, startCell.col + dirC * 18, startCell.row + dirR * 18, 6)) ??
+        ? nearestRoad(world, startCell.col + dirC * hop, startCell.row + dirR * hop, 14) ??
+          roadProgressToward(world, startCell, goalCell, hop)
+        : nearestWalkable(world, startCell.col + dirC * hop, startCell.row + dirR * hop, 6)) ??
       goalCell;
   }
 
@@ -104,7 +107,7 @@ export function findPath(
 
     for (const n of world.neighbors4(current.col, current.row)) {
       if (!cellAllowed(world, n.col, n.row, roadsOnly)) continue;
-      const span = roadsOnly ? 48 : 26;
+      const span = roadsOnly ? 72 : 26;
       if (
         Math.abs(n.col - startCell.col) > span ||
         Math.abs(n.row - startCell.row) > span
@@ -149,12 +152,48 @@ function reconstruct(world: ChunkWorld, node: Node): Vector2[] {
   const path: Vector2[] = [];
   let cur: Node | null = node;
   let guard = 0;
-  while (cur && guard++ < 64) {
+  // Roads-only arterials can be long — truncating here dropped the start of the
+  // path so cars aimed at a far waypoint through lots and stuck on curbs.
+  while (cur && guard++ < 220) {
     path.push(world.cellCenter(cur.col, cur.row));
     cur = cur.parent;
   }
   path.reverse();
   return path;
+}
+
+/**
+ * Greedy road walk toward a goal cell — used when crow-flies nearest-road
+ * lands off the connected network (block interiors).
+ */
+function roadProgressToward(
+  world: ChunkWorld,
+  start: { col: number; row: number },
+  goal: { col: number; row: number },
+  maxSteps: number,
+): { col: number; row: number } | null {
+  let cur = { col: start.col, row: start.row };
+  if (!isRoadLike(world.getKind(cur.col, cur.row))) {
+    const near = nearestRoad(world, cur.col, cur.row, 14);
+    if (!near) return null;
+    cur = near;
+  }
+  for (let step = 0; step < maxSteps; step++) {
+    let best: { col: number; row: number } | null = null;
+    let bestMd = manhattan(cur, goal);
+    for (const n of world.neighbors4(cur.col, cur.row)) {
+      if (!isRoadLike(world.getKind(n.col, n.row))) continue;
+      const md = manhattan(n, goal);
+      if (md < bestMd) {
+        bestMd = md;
+        best = n;
+      }
+    }
+    if (!best) break;
+    cur = best;
+    if (manhattan(cur, goal) <= 1) break;
+  }
+  return cur;
 }
 
 export function nearestWalkable(

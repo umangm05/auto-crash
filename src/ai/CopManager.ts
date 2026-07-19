@@ -5,8 +5,10 @@ import { GAMEPLAY, copSenseRadius } from '../config/GameConfig';
 import { Cop } from '../entities/Cop';
 import type { Thief } from '../entities/Thief';
 import type { ChunkWorld } from '../map/ChunkWorld';
+import { nearestRoadPoint } from '../map/Pathfinding';
 import { addBody, type PhysicsWorld } from '../physics/world';
 import { CopRadio } from './CopRadio';
+import { steering } from './SteeringBehaviors';
 
 const ROLES: CopRole[] = ['lead', 'flank', 'ambush'];
 
@@ -74,7 +76,7 @@ export class CopManager {
     view: ViewRect,
   ): void {
     this.applyOffScreenSpeeds(view, world);
-    this.unwedgeCops(dt);
+    this.unwedgeCops(dt, world);
 
     this.spawnTimer += dt;
     if (this.spawnTimer < GAMEPLAY.copSpawnIntervalSec) return;
@@ -123,8 +125,11 @@ export class CopManager {
     }
   }
 
-  /** Face radio if wedged — never teleport/respawn (interferes with chase logic). */
-  private unwedgeCops(dt: number): void {
+  /**
+   * If wedged on a curb, drop the stale path and face along asphalt toward
+   * the radio (never crow-flies through a lot — that re-pins them).
+   */
+  private unwedgeCops(dt: number, world: ChunkWorld): void {
     const anchor = this.radio.hasContact ? this.radio.pos : null;
 
     for (let i = 0; i < this.cops.length; i++) {
@@ -144,7 +149,28 @@ export class CopManager {
       }
 
       if ((this.stuckSec[i] ?? 0) < GAMEPLAY.copStuckTimeSec) continue;
-      if (anchor) cop.car.faceToward(anchor);
+
+      const wp = steering.nextWaypoint(cop.car);
+      steering.invalidatePath(cop.car);
+      const roadAnchor = anchor
+        ? (nearestRoadPoint(world, anchor, 24) ?? anchor)
+        : null;
+      let face = wp;
+      if (!face && roadAnchor) {
+        const toward = roadAnchor.sub(pos);
+        if (toward.length() > 4) {
+          face =
+            nearestRoadPoint(
+              world,
+              pos.add(toward.normalize().scale(80)),
+              12,
+            ) ?? roadAnchor;
+        }
+      }
+      if (!face) {
+        face = nearestRoadPoint(world, pos.add(cop.car.heading.scale(60)), 8);
+      }
+      if (face) cop.car.faceToward(face);
       this.stuckSec[i] = 0;
     }
   }

@@ -165,9 +165,16 @@ export class Cop {
       { roadsOnly },
     );
 
-    // Always commit toward the radio chase point when it's behind / freshly updated
-    // (roads-only still needs U-turns onto a new fix).
-    this.snapTowardRadio(chase, radioUpdated || lockOn || this.hasVisual);
+    // Commit heading onto the *road path*, not crow-flies radio.
+    // Snapping at chase through lots pinned cops on curbs forever.
+    if (roadsOnly) {
+      const wp = steering.nextWaypoint(this.car);
+      if (wp) {
+        this.snapTowardTarget(wp, radioUpdated || lockOn || this.hasVisual);
+      }
+    } else {
+      this.snapTowardTarget(chase, radioUpdated || lockOn || this.hasVisual);
+    }
 
     const others = [];
     for (const c of pack) {
@@ -178,8 +185,8 @@ export class Cop {
     this.car.integrateControls(dt);
   }
 
-  /** Override heading toward radio so cops don't keep driving past a fix behind them. */
-  private snapTowardRadio(target: Vector2, aggressive: boolean): void {
+  /** Override heading toward a target so cops don't keep driving past a fix behind them. */
+  private snapTowardTarget(target: Vector2, aggressive: boolean): void {
     const to = target.sub(this.car.pos);
     if (to.length() < 8) return;
     const desired = to.heading();

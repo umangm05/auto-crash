@@ -90,7 +90,8 @@ export const GAMEPLAY = {
   offScreenSpeedMult: 2,
   /** Must stay nearly motionless this long before counting as wedged. */
   copStuckSpeed: 2.5,
-  copStuckTimeSec: 8,
+  /** Faster unwedge — curb pins used to sit for 8s doing nothing useful. */
+  copStuckTimeSec: 3.5,
   /** Also require almost no position change while "stuck". */
   copStuckMovePx: 18,
   catchRadius: 20,
