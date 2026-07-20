@@ -136,9 +136,20 @@ Append an entry each time a design/structural decision is made. Format:
 - **Decision:** `@mlc-ai/web-llm` with `SmolLM2-360M-Instruct-q4f16_1-MLC` via
   `CreateWebWorkerMLCEngine`; JSON-mode parse into behavior scalars; dynamic
   import so the main game bundle stays light; graceful fallback to manual sliders.
+  **UI prompt is temporarily commented out** in `SetupOverlay` (sliders only);
+  wire + `runLlm` kept as comments for easy restore.
 - **Why:** Keeps model download/inference off the animation thread; WebGPU may be
-  unavailable so the game must remain playable without LLM.
-- **Date:** 2026-07-18.
+  unavailable so the game must remain playable without LLM. Prompt hidden for
+  now so first-time setup stays focused on match options + how-to-play.
+- **Date:** 2026-07-18 (UI paused 2026-07-20).
+
+### Setup onboarding
+- **Decision:** Setup modal always shows a one-line pitch + permanent **How to
+  play** card. First visit also shows a dismissible intro (`localStorage`
+  `acc-intro-seen-v1`); starting a match marks it seen.
+- **Why:** New players otherwise land on tuners with no frame for what the game
+  is or whether to pick AI vs Manual.
+- **Date:** 2026-07-20.
 
 ### Map & randomization
 - **Decision:** Infinite **chunked** world (`ChunkWorld`) with biomes (city roads /
@@ -318,3 +329,9 @@ Append an entry each time a design/structural decision is made. Format:
 - 2026-07-20: Civic traffic lane rules — H roads: north half west / south half
   east; V roads: west half north / east half south (`trafficLanes.ts`). Cars
   snap to lane centers; mid-block axis-locked; junctions exit onto matching half.
+- 2026-07-20: WebLLM style prompt commented out in setup UI; added first-visit
+  intro + always-visible How to play card so newcomers understand the chase.
+- 2026-07-20: Manual control hides AI sliders/path style and shows WASD + arrow
+  keycap illustrations (Space = nitro) in the setup right column.
+- 2026-07-20: Map seed defaults to a random adjective-noun-number each visit /
+  setup show; optional field with hint + reroll button (same seed = same city).
