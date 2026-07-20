@@ -335,3 +335,5 @@ Append an entry each time a design/structural decision is made. Format:
   keycap illustrations (Space = nitro) in the setup right column.
 - 2026-07-20: Map seed defaults to a random adjective-noun-number each visit /
   setup show; optional field with hint + reroll button (same seed = same city).
+- 2026-07-20: README rewritten for players (features, controls, screenshots under
+  `references/screenshots/`); WebLLM UI noted as temporarily hidden.
