@@ -147,10 +147,12 @@ Append an entry each time a design/structural decision is made. Format:
 - **Decision:** With `allowOffRoad: false`, cops path on asphalt only. Heading
   commits use the next A* waypoint — never crow-flies radio through lots.
   Chase uses the live thief position, aggressive throttle, and chunk prefetch
-  under each cop. Off-screen units get edge-of-screen markers.
+  under each cop. Off-screen units get edge-of-screen markers. Each cop rolls
+  a seeded `HandlingFeel` (turn/grip/accel/speed/brake + silhouette/siren).
 - **Why:** Direct snaps at the thief pointed into curbs/buildings and left cops
   wedged; slow corner throttle + missing chunks made packs never close. Edge
   markers give the thief directional awareness without omniscient minimap clutter.
+  Handling noise stops the pack looking/driving like one cloned vehicle.
 - **Date:** 2026-07-19.
 
 ### Chase AI feel
@@ -299,3 +301,6 @@ Append an entry each time a design/structural decision is made. Format:
   escalation (+3%/spawn), not world speed. Axis timer only resets on E-W↔N-S
   flip + hard perpendicular goal. Road rarity 40/20/20/20
   (2-lane / 4-lane / 1-lane / bridge); city seed v9.
+- 2026-07-19: Per-cop `HandlingFeel` noise (turn rate, grip, accel, top speed,
+  brake, body scale / length, siren phase) via `randomHandling` — pack no
+  longer drives/looks identical.

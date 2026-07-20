@@ -66,7 +66,7 @@ export const GAMEPLAY = {
   nitroDurationSec: 1,
   nitroCooldownSec: 5,
   /** Multiplier on thief top speed while nitro burns (must be >1). */
-  nitroSpeedMult: 1.1,
+  nitroSpeedMult: 1.2,
   /** Extra accel while nitro is burning (base accel is too weak to hit 1.5× in 1s). */
   nitroAccelScale: 2.4,
   /** Cop proximity glow / sense baseline */

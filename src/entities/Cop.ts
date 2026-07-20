@@ -1,5 +1,5 @@
 import { Vector2 } from '../core/Vector2';
-import type { Rng } from '../core/rng';
+import { createRng, type Rng } from '../core/rng';
 import type { BehaviorConfig, CopRole } from '../core/types';
 import { GAMEPLAY, STEERING, copSenseRadius, topSpeed } from '../config/GameConfig';
 import { steering } from '../ai/SteeringBehaviors';
@@ -8,7 +8,7 @@ import type { ChunkWorld } from '../map/ChunkWorld';
 import { isRoadLike } from '../map/biomes';
 import { raycastGrid } from '../map/gridCollision';
 import { nearestIntersectionAhead, nearestRoadPoint } from '../map/Pathfinding';
-import { Car } from './Car';
+import { Car, randomHandling } from './Car';
 
 export class Cop {
   readonly car: Car;
@@ -40,6 +40,8 @@ export class Cop {
   ) {
     this.index = index;
     this.role = role;
+    // Stable per-unit feel so each cruiser turns/grips/looks a bit different
+    const feelRng = createRng(`cop-handling|${index}`);
     this.car = new Car({
       x,
       y,
@@ -48,6 +50,7 @@ export class Cop {
       config,
       rng,
       speedMultiplier,
+      handling: randomHandling(feelRng),
     });
     this.car.proximityRadius = GAMEPLAY.baseCopSenseRadius;
   }

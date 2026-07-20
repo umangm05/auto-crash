@@ -7,6 +7,56 @@ import { createCarBody, type BodyLabel } from '../physics/world';
 
 export type CarStyle = 'thief' | 'cop';
 
+/** Per-vehicle feel — cops get noisy variants so the pack isn't identical. */
+export interface HandlingFeel {
+  /** Max turn-rate multiplier (steering / turning radius). */
+  turnRate: number;
+  /** Lateral grip multiplier. */
+  grip: number;
+  /** Acceleration multiplier. */
+  accel: number;
+  /** Top-speed multiplier (subtle). */
+  topSpeed: number;
+  /** Brake strength multiplier. */
+  brake: number;
+  /** Drawn body size. */
+  bodyScale: number;
+  /** Nose length bias — longer vs stubbier silhouette. */
+  lengthBias: number;
+  /** Siren blink phase so lights don't sync. */
+  sirenPhase: number;
+}
+
+export const DEFAULT_HANDLING: HandlingFeel = {
+  turnRate: 1,
+  grip: 1,
+  accel: 1,
+  topSpeed: 1,
+  brake: 1,
+  bodyScale: 1,
+  lengthBias: 1,
+  sirenPhase: 0,
+};
+
+/** ±spread around 1.0 from a seeded rng. */
+function jitter(rng: Rng, spread: number): number {
+  return 1 + (rng() * 2 - 1) * spread;
+}
+
+/** Roll a unique handling profile (cops). Spreads are readable but not wild. */
+export function randomHandling(rng: Rng): HandlingFeel {
+  return {
+    turnRate: jitter(rng, 0.2),
+    grip: jitter(rng, 0.16),
+    accel: jitter(rng, 0.14),
+    topSpeed: jitter(rng, 0.09),
+    brake: jitter(rng, 0.14),
+    bodyScale: jitter(rng, 0.12),
+    lengthBias: 0.82 + rng() * 0.4,
+    sirenPhase: rng() * Math.PI * 2,
+  };
+}
+
 export interface CarOptions {
   x: number;
   y: number;
@@ -16,6 +66,8 @@ export interface CarOptions {
   config: BehaviorConfig;
   speedMultiplier?: number;
   rng: Rng;
+  /** Omit for stock feel (thief); cops pass `randomHandling(...)`. */
+  handling?: HandlingFeel;
 }
 
 /**
@@ -25,6 +77,7 @@ export interface CarOptions {
 export class Car {
   readonly body: Matter.Body;
   readonly style: CarStyle;
+  readonly handling: HandlingFeel;
   config: BehaviorConfig;
   speedMultiplier: number;
   tractionMultiplier = 1;
@@ -49,6 +102,7 @@ export class Car {
     this.config = opts.config;
     this.speedMultiplier = opts.speedMultiplier ?? 1;
     this.rng = opts.rng;
+    this.handling = opts.handling ?? { ...DEFAULT_HANDLING };
   }
 
   get pos(): Vector2 {
@@ -152,14 +206,18 @@ export class Car {
     // Do NOT floor surface at 0.15 — that broke allowOffRoad / roads-only bans
     const surface = Math.max(0, Math.min(1, this.surfaceSpeedScale));
     const banned = surface < 0.05;
+    const feel = this.handling;
     const maxSpd = banned
       ? 0
-      : topSpeed(this.config.aggression, this.speedMultiplier) * Math.max(surface, 0.15);
+      : topSpeed(this.config.aggression, this.speedMultiplier) *
+        feel.topSpeed *
+        Math.max(surface, 0.15);
 
     // Turn rate drops at speed (real-car feel); low driftStability = looser / more oversteer
     const speedFactor = 1 - Math.min(0.75, speedNow / Math.max(1, maxSpd || 1)) * 0.7;
     const stability = 0.35 + this.config.driftStability * 0.65;
-    let turnRate = CAR.maxTurnRate * speedFactor * (0.7 + stability * 0.5);
+    let turnRate =
+      CAR.maxTurnRate * speedFactor * (0.7 + stability * 0.5) * feel.turnRate;
 
     let err = wrapAngle(this.desiredHeading - this.angle);
     // Micro jitter (blueprint) — tiny, not spin
@@ -189,6 +247,7 @@ export class Car {
       const a =
         CAR.accel *
         this.accelScale *
+        feel.accel *
         this.throttle *
         (0.55 + this.config.aggression * 0.6) *
         (0.55 + surface * 0.45);
@@ -199,6 +258,7 @@ export class Car {
       const brakePower = -this.throttle;
       const decel =
         CAR.brake *
+        feel.brake *
         brakePower *
         (0.65 + this.config.driftStability * 0.35) *
         (0.55 + surface * 0.45) *
@@ -227,7 +287,10 @@ export class Car {
 
     // Lateral grip / drift (blueprint 4.2)
     const grip =
-      (CAR.baseGrip * (0.25 + this.config.driftStability * 0.75) * this.tractionMultiplier) *
+      (CAR.baseGrip *
+        feel.grip *
+        (0.25 + this.config.driftStability * 0.75) *
+        this.tractionMultiplier) *
       Math.min(1, dt * 60);
     const lat = vx * side.x + vy * side.y;
     vx -= side.x * lat * grip;
@@ -293,6 +356,8 @@ export class Car {
 
   render(ctx: CanvasRenderingContext2D, timeSec: number): void {
     const { x, y } = this.body.position;
+    const s = this.handling.bodyScale;
+    const len = this.handling.lengthBias;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(this.angle);
@@ -309,13 +374,18 @@ export class Car {
       ctx.fill();
       ctx.shadowBlur = 0;
     } else {
-      const pulse = 0.55 + 0.45 * Math.sin(timeSec * 8);
+      // Unique silhouette + desynced siren so units don't clone each other
+      const pulse =
+        0.55 + 0.45 * Math.sin(timeSec * 8 + this.handling.sirenPhase);
       ctx.strokeStyle = pulse > 0.55 ? '#ff3b3b' : '#3b82ff';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1.7 + s * 0.5;
+      const nose = 12 * len * s;
+      const tail = 9 * s;
+      const halfW = 5.5 * s;
       ctx.beginPath();
-      ctx.moveTo(14, 0);
-      ctx.lineTo(-10, -6);
-      ctx.lineTo(-10, 6);
+      ctx.moveTo(nose, 0);
+      ctx.lineTo(-tail, -halfW);
+      ctx.lineTo(-tail, halfW);
       ctx.closePath();
       ctx.stroke();
     }
