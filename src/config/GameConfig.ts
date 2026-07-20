@@ -1,4 +1,4 @@
-import type { BehaviorConfig, Difficulty } from '../core/types';
+import type { BehaviorConfig, Difficulty, TrafficLevel } from '../core/types';
 import { DEFAULT_BEHAVIOR } from '../core/types';
 
 export const COLORS = {
@@ -101,8 +101,39 @@ export const GAMEPLAY = {
    * driving). Stops monotonous single-axis chases.
    */
   thiefMaxStraightSec: 10,
+  /** Traffic cruise speed vs a baseline chase car (speedMult 1). */
+  trafficSpeedMult: 0.8,
+  /** Comfort gap — start easing off the leader ahead. */
+  trafficFollowComfort: 70,
+  /** Slow to a crawl when this close to the car ahead. */
+  trafficFollowSlow: 42,
+  /** Full stop when this close (traffic never rear-ends). */
+  trafficFollowStop: 26,
+  /** Soft separate if two civics somehow overlap. */
+  trafficMinSpacing: 24,
+  /** Min spawn distance between traffic cars. */
+  trafficSpawnSpacing: 90,
 } as const;
 
+/** Setup Traffic presets — count of civic cars kept near the chase. */
+export const TRAFFIC_PRESETS: Record<
+  TrafficLevel,
+  { count: number; radius: number; label: string }
+> = {
+  light: { count: 10, radius: 900, label: 'Light' },
+  medium: { count: 20, radius: 1000, label: 'Moderate' },
+  heavy: { count: 34, radius: 1100, label: 'Heavy' },
+};
+
+/** Fixed cop AI when player is always Thief (Cop mode coming soon). */
+export const COP_AI_BEHAVIOR: BehaviorConfig = {
+  aggression: 0.55,
+  driftStability: 0.55,
+  proximityPanic: 0.55,
+  pathStyle: 'Linear',
+};
+
+/** Map building density — difficulty UI removed; city stays medium-dense. */
 export const DIFFICULTY_PRESETS: Record<
   Difficulty,
   { density: number; streetWidth: number; opponent: BehaviorConfig; label: string }
@@ -111,34 +142,19 @@ export const DIFFICULTY_PRESETS: Record<
     density: 0.28,
     streetWidth: 3,
     label: 'Open Grid',
-    opponent: {
-      aggression: 0.4,
-      driftStability: 0.75,
-      proximityPanic: 0.35,
-      pathStyle: 'Linear',
-    },
+    opponent: COP_AI_BEHAVIOR,
   },
   medium: {
     density: 0.45,
     streetWidth: 2,
     label: 'Alleyway Maze',
-    opponent: {
-      aggression: 0.55,
-      driftStability: 0.55,
-      proximityPanic: 0.55,
-      pathStyle: 'Linear',
-    },
+    opponent: COP_AI_BEHAVIOR,
   },
   hard: {
     density: 0.62,
     streetWidth: 2,
     label: 'Dense Obstacles',
-    opponent: {
-      aggression: 0.75,
-      driftStability: 0.35,
-      proximityPanic: 0.7,
-      pathStyle: 'Chaotic',
-    },
+    opponent: COP_AI_BEHAVIOR,
   },
 };
 

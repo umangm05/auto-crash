@@ -243,6 +243,32 @@ export class SteeringBehaviors {
     return false;
   }
 
+  /** Steer around nearby traffic / pack cars so chase units don't ram civics. */
+  nudgeAwayFromCars(
+    car: Car,
+    others: ReadonlyArray<{ pos: Vector2 }>,
+    radius = 42,
+  ): void {
+    let push = Vector2.zero();
+    const heading = car.heading;
+    for (const other of others) {
+      const to = other.pos.sub(car.pos);
+      const dist = to.length();
+      if (dist < 1e-3 || dist > radius) continue;
+      const along = to.normalize().dot(heading);
+      if (along < -0.1) continue; // behind us
+      const away = car.pos.sub(other.pos).normalize();
+      const weight = (1 - dist / radius) * (0.4 + Math.max(0, along));
+      push = push.add(away.scale(weight));
+    }
+    if (push.length() < 1e-3) return;
+    const blended = heading.add(push.normalize().scale(0.7));
+    if (blended.length() < 1e-3) return;
+    car.setDesiredHeading(
+      blendHeading(car.angle, blended.heading(), 0.45),
+    );
+  }
+
   /** Drop cached A* so the next followPath recomputes toward a new radio fix. */
   invalidatePath(car: Car): void {
     pathCaches.delete(car.body);

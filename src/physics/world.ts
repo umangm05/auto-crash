@@ -1,6 +1,6 @@
 import Matter from 'matter-js';
 
-export type BodyLabel = 'thief' | 'cop' | 'building' | 'boundary';
+export type BodyLabel = 'thief' | 'cop' | 'traffic' | 'building' | 'boundary';
 
 export interface PhysicsWorld {
   engine: Matter.Engine;

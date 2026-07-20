@@ -1,4 +1,4 @@
-# Architecture Notes — Synchronized Chase
+# Architecture Notes — Auto Crash Chase
 
 ## Module map
 
@@ -22,19 +22,22 @@
 | `src/ai/SteeringBehaviors.ts` | Path follow + feeler avoid / open-lane probe |
 | `src/ai/CopManager.ts` | Spawn cadence, roles, radio net, speed compounding |
 | `src/ai/CopRadio.ts` | Shared last-known thief contact from visual broadcasts |
+| `src/ai/TrafficManager.ts` | Civic traffic spawn/cull around chase focus |
+| `src/map/trafficLanes.ts` | H/V two-way lane centers (left=W/N, right=E/S) |
+| `src/entities/TrafficCar.ts` | Lane-locked cruise; junction turns onto exit lane |
 | `src/ui/*` | Setup overlay, HUD, game-over |
 | `src/llm/*` | WebLLM worker + JSON config parser |
 | `src/config/GameConfig.ts` | Tunables, colors, difficulty presets |
 
 ## Data flow
 
-1. Setup overlay → `MatchSettings` (mode, difficulty, biome, seed, configs,
-   `manual` — Thief-only keyboard drive).
-2. `Game.startMatch` builds Matter world + `ChunkWorld`, spawns thief + lead
-   cop near origin; attaches `KeyboardInput` when `manual`.
-3. Each fixed tick: stream chunks → camera → CopManager / spills → thief
-   (AI flee **or** WASD/arrows) + cop AI → `integrateControls` → Matter step →
-   zero spin → grid wall resolve → catch-distance check.
+1. Setup overlay → `MatchSettings` (Thief mode, traffic level, biome, seed,
+   configs, `manual` keyboard drive). Cop mode UI is disabled (soon).
+2. `Game.startMatch` builds Matter world + `ChunkWorld` (fixed medium density),
+   spawns thief + cops + civic traffic; attaches `KeyboardInput` when `manual`.
+3. Each fixed tick: stream chunks → camera → CopManager / TrafficManager /
+   spills → thief (AI flee **or** WASD/arrows) + cop AI (avoid traffic) →
+   `integrateControls` → Matter step → zero spin → grid wall resolve → catch.
 4. Distance `thief`↔`cop` < catch radius → game over + survival metrics.
 
 See also [WORLD.md](WORLD.md).

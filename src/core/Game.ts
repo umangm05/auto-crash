@@ -1,5 +1,6 @@
 import Matter from 'matter-js';
 import { CopManager } from '../ai/CopManager';
+import { TrafficManager } from '../ai/TrafficManager';
 import type { MatchSettings } from './types';
 import { createRng, type Rng } from './rng';
 import { GameLoop } from './GameLoop';
@@ -40,6 +41,7 @@ export class Game {
   private world: ChunkWorld | null = null;
   private thief: Thief | null = null;
   private cops: CopManager | null = null;
+  private traffic: TrafficManager | null = null;
   private spills: RoadSpillManager | null = null;
   private rng: Rng = createRng('default');
   private survival = 0;
@@ -80,23 +82,25 @@ export class Game {
     this.rng = createRng(settings.seed);
 
     this.physics = createPhysicsWorld();
-    this.world = new ChunkWorld(settings.seed, settings.biome, settings.difficulty);
+    // Map density fixed at medium — setup Difficulty was replaced by Traffic
+    this.world = new ChunkWorld(settings.seed, settings.biome, 'medium');
 
-    const thiefConfig =
-      settings.mode === 'thief' ? settings.playerConfig : settings.opponentConfig;
-    const copConfig =
-      settings.mode === 'cop' ? settings.playerConfig : settings.opponentConfig;
+    const thiefConfig = settings.playerConfig;
+    const copConfig = settings.opponentConfig;
 
     const spawnPos = this.world.findSpawnNear(0, 0, 16);
     this.world.updateAround(spawnPos.x, spawnPos.y, 2);
 
-    this.manualThief = settings.mode === 'thief' && settings.manual;
+    this.manualThief = settings.manual;
     this.thief = new Thief(spawnPos.x, spawnPos.y, thiefConfig, this.rng);
     this.thief.manual = this.manualThief;
     addBody(this.physics.world, this.thief.car.body);
 
     this.cops = new CopManager(copConfig, this.rng);
     this.cops.spawnInitial(this.physics, this.world, spawnPos);
+
+    this.traffic = new TrafficManager(settings.traffic, this.rng);
+    this.traffic.spawnInitial(this.physics, this.world, spawnPos);
 
     this.spills = new RoadSpillManager(settings.seed);
     this.camera.snapTo(spawnPos, this.canvas.width, this.canvas.height);
@@ -126,6 +130,7 @@ export class Game {
   }
 
   private teardownWorld(): void {
+    this.traffic?.clear(this.physics);
     this.world?.clear();
     if (this.physics) {
       clearWorld(this.physics.world);
@@ -134,6 +139,7 @@ export class Game {
     this.world = null;
     this.thief = null;
     this.cops = null;
+    this.traffic = null;
     this.spills = null;
   }
 
@@ -173,7 +179,16 @@ export class Game {
 
   private update(dt: number): void {
     if (!this.playing || this.over) return;
-    if (!this.physics || !this.world || !this.thief || !this.cops || !this.spills) return;
+    if (
+      !this.physics ||
+      !this.world ||
+      !this.thief ||
+      !this.cops ||
+      !this.traffic ||
+      !this.spills
+    ) {
+      return;
+    }
 
     this.survival += dt;
     this.timeSec += dt;
@@ -193,6 +208,7 @@ export class Game {
 
     const view = this.camera.worldBounds(this.canvas.width, this.canvas.height);
     this.cops.update(dt, this.physics, this.world, focus, view);
+    this.traffic.update(dt, this.physics, this.world, focus);
     this.spills.update(dt, this.world, focus, this.survival);
 
     this.thief.refreshThreatSense(this.cops.cops);
@@ -209,12 +225,14 @@ export class Game {
     // Visual → radio broadcast before AI so the whole pack shares one contact
     this.cops.updateRadio(dt, this.world, this.thief);
 
+    const trafficPos = this.traffic.cars.map((t) => t.car);
     this.thief.update(
       dt,
       this.world,
       this.cops.cops,
       this.rng,
       this.manualThief ? this.keys : undefined,
+      trafficPos,
     );
     for (const cop of this.cops.cops) {
       cop.update(
@@ -223,6 +241,7 @@ export class Game {
         this.cops.radio,
         this.cops.cops,
         this.thief.car.pos,
+        trafficPos,
       );
     }
 
@@ -233,6 +252,9 @@ export class Game {
     for (const cop of this.cops.cops) {
       Matter.Body.setAngularVelocity(cop.car.body, 0);
     }
+    for (const t of this.traffic.cars) {
+      Matter.Body.setAngularVelocity(t.car.body, 0);
+    }
 
     // Lots act as walls when roads-only — scrape the curb, no teleport loop
     resolveCarAgainstGrid(this.thief.car, this.world, {
@@ -242,6 +264,9 @@ export class Game {
       resolveCarAgainstGrid(cop.car, this.world, {
         roadsOnly: cop.mustStayOnRoad,
       });
+    }
+    for (const t of this.traffic.cars) {
+      resolveCarAgainstGrid(t.car, this.world, { roadsOnly: true });
     }
 
     for (const cop of this.cops.cops) {
@@ -271,7 +296,9 @@ export class Game {
       this.renderIdle();
       return;
     }
-    if (!this.world || !this.thief || !this.cops || !this.spills) return;
+    if (!this.world || !this.thief || !this.cops || !this.traffic || !this.spills) {
+      return;
+    }
 
     const { ctx, canvas } = this;
     if (!Number.isFinite(this.camera.x) || !Number.isFinite(this.camera.y)) return;
@@ -284,6 +311,7 @@ export class Game {
     const view = this.camera.worldBounds(canvas.width, canvas.height, 40);
     this.world.render(ctx, view);
     this.spills.render(ctx);
+    for (const t of this.traffic.cars) t.render(ctx, this.timeSec);
     this.thief.render(ctx, this.timeSec);
     for (const cop of this.cops.cops) cop.render(ctx, this.timeSec);
     this.camera.end(ctx);

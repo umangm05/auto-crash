@@ -31,7 +31,8 @@ aligned rectangle per H∩V cross (`collectIntersections`).
 
 Off-road (OPEN / PARK) is traversable but ~32% speed.
 
-Difficulty still scales obstacle density / AI presets.
+Building density is fixed (medium). Setup **Traffic** (Light / Moderate / Heavy)
+controls how many civic cars share the roads with the chase.
 
 ## Why cops used to vanish
 

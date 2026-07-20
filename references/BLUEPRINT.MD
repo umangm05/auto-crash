@@ -11,7 +11,7 @@
 ---
 
 ## 2. EXECUTIVE CORE SUMMARY
-"Synchronized Chase" is a minimal, high-intensity strategy game that turns the user's web browser into a top-down tactical viewport. The player acts not as the driver, but as the **Tuner/Strategist**. 
+"Auto Crash Chase" (formerly Synchronized Chase) is a minimal, high-intensity strategy game that turns the user's web browser into a top-down tactical viewport. The player acts as the **Tuner/Strategist** (with optional Manual thief drive). 
 
 Before a match begins, players describe their tactical approach using natural language (e.g., *"I want a fast, high-drift getaway style that aggressively skims past walls and baits chasers into narrow gaps"*). A local WebLLM translates this semantic input into deterministic numerical constants. The game loop then feeds these values into a real-time vector steering engine that controls the user's car.
 

@@ -85,10 +85,11 @@ export class Thief {
     cops: Cop[],
     rng: Rng,
     input?: KeyboardInput,
+    traffic: ReadonlyArray<{ pos: Vector2 }> = [],
   ): void {
     this.refreshThreatSense(cops);
     if (this.manual && input) {
-      this.updateManual(dt, input);
+      this.updateManual(dt, input, traffic);
       return;
     }
 
@@ -229,11 +230,14 @@ export class Thief {
     if ((threats > 0 || overdueRoute) && this.escapeTarget) {
       this.commitEvadeTurn(this.escapeTarget, world, roadsOnly, overdueRoute);
     } else if (!this.isNitroActive) {
-      steering.emergencyBrakeForCars(
-        this.car,
-        cops.map((c) => c.car),
-      );
+      steering.emergencyBrakeForCars(this.car, [
+        ...cops.map((c) => c.car),
+        ...traffic,
+      ]);
     }
+
+    // Weave around civic traffic
+    if (traffic.length) steering.nudgeAwayFromCars(this.car, traffic);
 
     // Keep off the roadside — feelers ignore lots, so recenter on asphalt.
     if (roadsOnly && !this.isNitroActive) {
@@ -283,7 +287,11 @@ export class Thief {
   }
 
   /** Player drive: W/↑ throttle, S/↓ brake, A/← D/→ turn, Space nitro. */
-  private updateManual(dt: number, input: KeyboardInput): void {
+  private updateManual(
+    dt: number,
+    input: KeyboardInput,
+    traffic: ReadonlyArray<{ pos: Vector2 }> = [],
+  ): void {
     this.tickManualNitro(dt, input.nitroPressed);
 
     const boost = this.isNitroActive ? GAMEPLAY.nitroSpeedMult : 1;
@@ -305,6 +313,13 @@ export class Thief {
       this.car.setDesiredHeading(this.car.angle + turn * 1.6);
     } else {
       this.car.setDesiredHeading(this.car.angle);
+    }
+
+    if (traffic.length) {
+      steering.nudgeAwayFromCars(this.car, traffic);
+      if (!this.isNitroActive) {
+        steering.emergencyBrakeForCars(this.car, traffic);
+      }
     }
 
     this.car.integrateControls(dt);

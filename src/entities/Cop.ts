@@ -89,6 +89,7 @@ export class Cop {
     radio: CopRadio,
     pack: readonly Cop[],
     thiefPosLive?: Vector2,
+    traffic: ReadonlyArray<{ pos: Vector2 }> = [],
   ): void {
     const config = this.car.config;
     const maxSpeed = topSpeed(config.aggression, this.car.speedMultiplier);
@@ -187,6 +188,8 @@ export class Cop {
     for (const c of pack) {
       if (c !== this) others.push(c.car);
     }
+    for (const t of traffic) others.push(t);
+    steering.nudgeAwayFromCars(this.car, traffic);
     steering.emergencyBrakeForCars(this.car, others);
 
     this.car.integrateControls(dt);

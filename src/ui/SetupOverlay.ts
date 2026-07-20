@@ -1,11 +1,14 @@
-import { DEFAULT_BEHAVIOR, DIFFICULTY_PRESETS } from '../config/GameConfig';
+import {
+  COP_AI_BEHAVIOR,
+  DEFAULT_BEHAVIOR,
+  TRAFFIC_PRESETS,
+} from '../config/GameConfig';
 import type {
   BehaviorConfig,
   Biome,
-  Difficulty,
   MatchSettings,
   PathStyle,
-  PlayMode,
+  TrafficLevel,
 } from '../core/types';
 import { clampBehavior } from '../core/types';
 import { BIOME_LABELS, ENABLED_BIOMES } from '../map/biomes';
@@ -27,9 +30,8 @@ function btnCss(active: boolean, disabled = false): string {
 
 export class SetupOverlay {
   private root: HTMLDivElement;
-  private mode: PlayMode = 'thief';
   private manual = false;
-  private difficulty: Difficulty = 'medium';
+  private traffic: TrafficLevel = 'medium';
   private biome: Biome = 'city';
   private aggression = DEFAULT_BEHAVIOR.aggression;
   private driftStability = DEFAULT_BEHAVIOR.driftStability;
@@ -39,7 +41,6 @@ export class SetupOverlay {
   private styleInput!: HTMLTextAreaElement;
   private statusEl!: HTMLDivElement;
   private llmProgressEl!: HTMLDivElement;
-  private manualRow!: HTMLDivElement;
   private taglineEl!: HTMLParagraphElement;
 
   constructor(
@@ -62,13 +63,13 @@ export class SetupOverlay {
   private template(): string {
     return `
       <div style="width:min(520px,100%);border:1px solid #30363d;border-radius:10px;background:#161b22;padding:22px;box-shadow:0 0 40px rgba(57,255,20,0.08);">
-        <h1 style="font-size:20px;letter-spacing:0.08em;color:#39ff14;margin-bottom:4px;">SYNCHRONIZED CHASE</h1>
-        <p id="tagline" style="color:#8b949e;font-size:12px;margin-bottom:18px;">Tuner / Strategist mode — AI drives both sides.</p>
+        <h1 style="font-size:20px;letter-spacing:0.08em;color:#39ff14;margin-bottom:4px;">AUTO CRASH CHASE</h1>
+        <p id="tagline" style="color:#8b949e;font-size:12px;margin-bottom:18px;">Tuner / Strategist — configure the thief, watch the chase.</p>
 
         <label style="${LABEL}">Play as</label>
         <div style="display:flex;gap:8px;margin-bottom:14px;">
           <button type="button" data-mode="thief" class="mode-btn" style="${btnCss(true)}">THIEF</button>
-          <button type="button" data-mode="cop" class="mode-btn" style="${btnCss(false)}">COP</button>
+          <button type="button" data-mode="cop" class="mode-btn" disabled style="${btnCss(false, true)}">COP (SOON)</button>
         </div>
 
         <div id="manual-row">
@@ -77,18 +78,19 @@ export class SetupOverlay {
             <button type="button" data-manual="ai" class="manual-btn" style="${btnCss(true)}">AI</button>
             <button type="button" data-manual="manual" class="manual-btn" style="${btnCss(false)}">MANUAL</button>
           </div>
-          <p style="color:#8b949e;font-size:10px;margin:0 0 14px;">Manual: WASD / arrows to drive, Space for nitro. Thief mode only.</p>
+          <p style="color:#8b949e;font-size:10px;margin:0 0 14px;">Manual: WASD / arrows to drive, Space for nitro.</p>
         </div>
 
-        <label style="${LABEL}">Difficulty</label>
-        <div style="display:flex;gap:8px;margin-bottom:14px;">
-          ${(['easy', 'medium', 'hard'] as Difficulty[])
+        <label style="${LABEL}">Traffic</label>
+        <div style="display:flex;gap:8px;margin-bottom:6px;">
+          ${(['light', 'medium', 'heavy'] as TrafficLevel[])
             .map(
-              (d) =>
-                `<button type="button" data-diff="${d}" class="diff-btn" style="${btnCss(d === 'medium')}">${DIFFICULTY_PRESETS[d].label}</button>`,
+              (t) =>
+                `<button type="button" data-traffic="${t}" class="traffic-btn" style="${btnCss(t === 'medium')}">${TRAFFIC_PRESETS[t].label}</button>`,
             )
             .join('')}
         </div>
+        <p style="color:#8b949e;font-size:10px;margin:0 0 14px;">Civic cars on the roads — denser traffic means more weaving for the chase.</p>
 
         <label style="${LABEL}">Biome / World</label>
         <div style="display:flex;gap:8px;margin-bottom:14px;">
@@ -137,6 +139,7 @@ export class SetupOverlay {
 
   private refreshGroup(selector: string, activeAttr: string, activeValue: string): void {
     this.root.querySelectorAll<HTMLButtonElement>(selector).forEach((b) => {
+      if (b.disabled) return;
       const active = b.getAttribute(activeAttr) === activeValue;
       b.setAttribute('style', btnCss(active));
     });
@@ -147,30 +150,19 @@ export class SetupOverlay {
     this.styleInput = this.root.querySelector('#style')!;
     this.statusEl = this.root.querySelector('#status')!;
     this.llmProgressEl = this.root.querySelector('#llm-progress')!;
-    this.manualRow = this.root.querySelector('#manual-row')!;
     this.taglineEl = this.root.querySelector('#tagline')!;
-
-    this.root.querySelectorAll<HTMLButtonElement>('.mode-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        this.mode = btn.dataset.mode as PlayMode;
-        this.refreshGroup('.mode-btn', 'data-mode', this.mode);
-        if (this.mode === 'cop') this.manual = false;
-        this.refreshManualUi();
-      });
-    });
 
     this.root.querySelectorAll<HTMLButtonElement>('.manual-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        if (this.mode !== 'thief') return;
         this.manual = btn.dataset.manual === 'manual';
         this.refreshManualUi();
       });
     });
 
-    this.root.querySelectorAll<HTMLButtonElement>('.diff-btn').forEach((btn) => {
+    this.root.querySelectorAll<HTMLButtonElement>('.traffic-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        this.difficulty = btn.dataset.diff as Difficulty;
-        this.refreshGroup('.diff-btn', 'data-diff', this.difficulty);
+        this.traffic = btn.dataset.traffic as TrafficLevel;
+        this.refreshGroup('.traffic-btn', 'data-traffic', this.traffic);
       });
     });
 
@@ -215,13 +207,13 @@ export class SetupOverlay {
         pathStyle: this.pathStyle,
       });
       this.onStart({
-        mode: this.mode,
-        difficulty: this.difficulty,
+        mode: 'thief',
+        traffic: this.traffic,
         biome: this.biome,
         seed: this.seedInput.value.trim() || `seed-${Date.now()}`,
         playerConfig,
-        opponentConfig: DIFFICULTY_PRESETS[this.difficulty].opponent,
-        manual: this.mode === 'thief' && this.manual,
+        opponentConfig: COP_AI_BEHAVIOR,
+        manual: this.manual,
       });
     });
 
@@ -230,13 +222,10 @@ export class SetupOverlay {
   }
 
   private refreshManualUi(): void {
-    const thief = this.mode === 'thief';
-    this.manualRow.style.display = thief ? 'block' : 'none';
-    if (!thief) this.manual = false;
     this.refreshGroup('.manual-btn', 'data-manual', this.manual ? 'manual' : 'ai');
     this.taglineEl.textContent = this.manual
-      ? 'Manual thief — WASD / arrows, Space = nitro. Cops stay AI.'
-      : 'Tuner / Strategist mode — AI drives both sides.';
+      ? 'Manual thief — WASD / arrows, Space = nitro. Weave through traffic.'
+      : 'Tuner / Strategist — configure the thief, watch the chase.';
   }
 
   private async runLlm(): Promise<void> {

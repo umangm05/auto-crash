@@ -5,7 +5,7 @@ import type { BehaviorConfig } from '../core/types';
 import { CAR, topSpeed } from '../config/GameConfig';
 import { createCarBody, type BodyLabel } from '../physics/world';
 
-export type CarStyle = 'thief' | 'cop';
+export type CarStyle = 'thief' | 'cop' | 'traffic';
 
 /** Per-vehicle feel — cops get noisy variants so the pack isn't identical. */
 export interface HandlingFeel {
@@ -373,6 +373,22 @@ export class Car {
       ctx.closePath();
       ctx.fill();
       ctx.shadowBlur = 0;
+    } else if (this.style === 'traffic') {
+      // Muted civic cars — unique scale/length from handling noise
+      const nose = 11 * len * s;
+      const tail = 8 * s;
+      const halfW = 5 * s;
+      const hue = 40 + this.handling.sirenPhase * 18;
+      ctx.fillStyle = `hsla(${hue}, 12%, 42%, 0.95)`;
+      ctx.strokeStyle = 'rgba(230,237,243,0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(nose, 0);
+      ctx.lineTo(-tail, -halfW);
+      ctx.lineTo(-tail, halfW);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
     } else {
       // Unique silhouette + desynced siren so units don't clone each other
       const pulse =

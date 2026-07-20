@@ -59,13 +59,12 @@ On **every** prompt, before finishing your turn, run this check:
 
 ## Project Overview
 
-**Synchronized Chase** is a 100% client-side top-down chase game. The player is
-a Tuner/Strategist: they pick Thief or Cop mode, configure steering scalars
-(manually or via local WebLLM from natural language), then watch AI-driven cars
-— or enable **Manual** (Thief only) and drive with WASD / arrows. Infinite
-streaming world (city / desert / rural biomes). Matter.js handles rigid-body
-physics; Canvas 2D paints wireframe neon visuals with a camera that follows the
-thief.
+**Auto Crash Chase** is a 100% client-side top-down chase game. The player
+configures the Thief (AI or Manual with WASD / arrows), picks traffic density,
+and survives as cops close in through civic traffic. Cop playable mode is
+coming soon. Infinite streaming world (city / desert / rural biomes). Matter.js
+handles rigid-body physics; Canvas 2D paints wireframe neon visuals with a
+camera that follows the thief.
 
 Run: `npm install && npm run dev`
 
@@ -115,14 +114,23 @@ Append an entry each time a design/structural decision is made. Format:
 - **Date:** 2026-07-18.
 
 ### Tooling & control model
-- **Decision:** TypeScript + Vite; default AI-vs-AI simulation, with optional
-  **Manual** thief drive (WASD / arrows, Space = nitro) from the setup overlay.
-  Manual is Thief-mode only; Cop mode stays tuner/AI.
-- **Why:** Strategist tuning remains the primary loop; Manual is a playtest /
-  fun escape hatch without inventing Cop driving. Keyboard lives in
-  `src/core/KeyboardInput.ts` and only attaches during a manual match.
-- **Date:** 2026-07-19 (manual added; was AI-only on 2026-07-18).
+- **Decision:** TypeScript + Vite; Thief-only playable mode (Cop = coming soon).
+  Optional **Manual** thief drive (WASD / arrows, Space = nitro). Setup
+  **Traffic** (Light/Moderate/Heavy) replaces old building-density Difficulty.
+- **Why:** Roads-only chase made “open/dense buildings” meaningless; traffic is
+  the readable difficulty axis. Cop mode deferred until that fantasy is ready.
+- **Date:** 2026-07-20 (traffic + rename; manual 2026-07-19).
 - **Details:** [references/ARCHITECTURE.md](references/ARCHITECTURE.md).
+
+### Civic traffic
+- **Decision:** Two-way lanes via `trafficLanes.ts`. Horizontal roads: north
+  half → left/west, south half → right/east. Vertical: west half → up/north,
+  east half → down/south. Cars stay on their lane centerline; mid-block only
+  that direction. Junctions: one turn roll onto a legal exit lane. Follow/brake
+  within the same lane stream; curb recover snaps back onto a lane.
+- **Why:** Free cardinal picks ignored road orientation and looked random;
+  opposing traffic needs separated halves so streams don’t head-on in one groove.
+- **Date:** 2026-07-20.
 
 ### WebLLM integration
 - **Decision:** `@mlc-ai/web-llm` with `SmolLM2-360M-Instruct-q4f16_1-MLC` via
@@ -304,3 +312,9 @@ Append an entry each time a design/structural decision is made. Format:
 - 2026-07-19: Per-cop `HandlingFeel` noise (turn rate, grip, accel, top speed,
   brake, body scale / length, siren phase) via `randomHandling` — pack no
   longer drives/looks identical.
+- 2026-07-20: Renamed to **Auto Crash Chase**; Cop mode Coming soon; Difficulty
+  → Traffic (Light/Moderate/Heavy) with civic `TrafficCar`s (0.8× speed,
+  junction-only turns, follow/brake so civics don’t crash each other).
+- 2026-07-20: Civic traffic lane rules — H roads: north half west / south half
+  east; V roads: west half north / east half south (`trafficLanes.ts`). Cars
+  snap to lane centers; mid-block axis-locked; junctions exit onto matching half.

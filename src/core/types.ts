@@ -1,4 +1,6 @@
+/** Kept for map density presets (fixed to medium in-game; UI uses Traffic). */
 export type Difficulty = 'easy' | 'medium' | 'hard';
+export type TrafficLevel = 'light' | 'medium' | 'heavy';
 export type PlayMode = 'thief' | 'cop';
 export type PathStyle = 'Linear' | 'Chaotic';
 export type CopRole = 'lead' | 'flank' | 'ambush';
@@ -13,7 +15,8 @@ export interface BehaviorConfig {
 
 export interface MatchSettings {
   mode: PlayMode;
-  difficulty: Difficulty;
+  /** Civic traffic density around the chase. */
+  traffic: TrafficLevel;
   biome: Biome;
   seed: string;
   playerConfig: BehaviorConfig;
