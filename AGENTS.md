@@ -102,6 +102,14 @@ Append an entry each time a design/structural decision is made. Format:
 - **Date:** 2026-07-18.
 - **Details:** [references/BLUEPRINT.MD](references/BLUEPRINT.MD).
 
+### Cross-links ("More from us")
+- **Decision:** The setup overlay ends with a "More from us" link row to the other
+  helper sites (Utility Helpers, PromptForge; Tiny Worlds 3D once it has a URL).
+  The list lives in `src/ui/moreFromUs.ts`.
+- **Why:** Owner decision D-HELPER-SITES-CROSSLINK — all helper sites link to each
+  other. The setup overlay is the only always-visible, non-canvas UI.
+- **Date:** 2026-11-23.
+
 ### Physics core
 - **Decision:** Use **Matter.js for cars only** (drive forces, car–car capture
   collisions). **Buildings are NOT Matter bodies** — wall collision / avoidance

@@ -13,6 +13,7 @@ import type {
 import { clampBehavior } from '../core/types';
 import { BIOME_LABELS, ENABLED_BIOMES } from '../map/biomes';
 import type { LLMClient } from '../llm/LLMClient';
+import { moreFromUsHtml } from './moreFromUs';
 
 export type StartHandler = (settings: MatchSettings) => void;
 
@@ -281,6 +282,11 @@ export class SetupOverlay {
           <div id="status" style="font-size:11px;color:#f85149;min-height:16px;margin-bottom:8px;"></div>
           <button type="button" id="start" style="${btnCss(true)}width:100%;padding:12px;">START CHASE</button>
         </div>
+
+        <nav aria-label="More from us" style="margin-top:14px;font-size:11px;line-height:1.6;">
+          <span style="letter-spacing:0.06em;color:#8b949e;margin-right:8px;">MORE FROM US</span>
+          ${moreFromUsHtml('color:#39ff14;text-decoration:underline;')}
+        </nav>
       </div>
       <style>
         @media (max-width: 640px) {
